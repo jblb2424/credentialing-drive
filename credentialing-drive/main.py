@@ -16,6 +16,7 @@ SCOPES = [
 
 STATE = {
     "oauth_state": None,
+    "code_verifier": None,
     "credentials": None,
     "folder_id": None,
     "page_token": None,
@@ -76,6 +77,7 @@ def google_start():
     )
 
     STATE["oauth_state"] = state
+    STATE["code_verifier"] = flow.code_verifier
     return RedirectResponse(authorization_url)
 
 
@@ -86,7 +88,12 @@ def google_callback(request: Request):
     if incoming_state != STATE["oauth_state"]:
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
 
+    code_verifier = STATE["code_verifier"]
+    if not code_verifier:
+        raise HTTPException(status_code=400, detail="OAuth authorization has expired")
+
     flow = create_flow()
+    flow.code_verifier = code_verifier
     # Cloud Run terminates TLS before forwarding requests to the container.
     authorization_response = str(request.url.replace(scheme="https"))
     flow.fetch_token(authorization_response=authorization_response)
@@ -100,6 +107,8 @@ def google_callback(request: Request):
         "client_secret": credentials.client_secret,
         "scopes": list(credentials.scopes),
     }
+    STATE["oauth_state"] = None
+    STATE["code_verifier"] = None
 
     return {
         "connected": True,
