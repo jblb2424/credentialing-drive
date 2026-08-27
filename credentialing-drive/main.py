@@ -87,7 +87,9 @@ def google_callback(request: Request):
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
 
     flow = create_flow()
-    flow.fetch_token(authorization_response=str(request.url))
+    # Cloud Run terminates TLS before forwarding requests to the container.
+    authorization_response = str(request.url.replace(scheme="https"))
+    flow.fetch_token(authorization_response=authorization_response)
 
     credentials = flow.credentials
     STATE["credentials"] = {
