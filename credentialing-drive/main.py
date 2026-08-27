@@ -11,7 +11,7 @@ app = FastAPI()
 SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly",
     "openid",
-    "email",
+    "https://www.googleapis.com/auth/userinfo.email",
 ]
 
 STATE = {
