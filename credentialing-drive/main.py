@@ -177,6 +177,23 @@ OCR text:
     return response.text
 
 
+def process_drive_pdf_in_memory(service, file_id):
+    metadata, pdf_bytes = download_drive_pdf(service, file_id)
+    try:
+        extracted_text, page_count = extract_text_with_document_ai(pdf_bytes)
+        interpretation = interpret_text_with_gemini(extracted_text)
+    finally:
+        # Release the raw source document immediately after managed processing.
+        pdf_bytes = b""
+
+    return {
+        "metadata": metadata,
+        "page_count": page_count,
+        "extracted_text": extracted_text,
+        "gemini_interpretation": interpretation,
+    }
+
+
 def process_drive_changes(service, connection):
     page_token = connection.get("page_token")
     folder_id = connection.get("folder_id")
@@ -223,7 +240,39 @@ def process_drive_changes(service, connection):
                 event_ref.create(event)
             except AlreadyExists:
                 continue
-            detected_changes.append(event)
+
+            if event["mime_type"] != PDF_MIME_TYPE:
+                event_ref.set({"status": "skipped"}, merge=True)
+                detected_changes.append({**event, "status": "skipped"})
+                continue
+
+            try:
+                result = process_drive_pdf_in_memory(service, file_id)
+            except Exception:
+                # Preserve no document contents or model output in logs or Firestore.
+                logger.exception("Automatic PDF processing failed for Drive file_id=%s", file_id)
+                event_ref.set({"status": "failed"}, merge=True)
+                detected_changes.append({**event, "status": "failed"})
+                continue
+
+            event_ref.set(
+                {
+                    "status": "processed",
+                    "page_count": result["page_count"],
+                    "extracted_character_count": len(result["extracted_text"]),
+                    "gemini_response_character_count": len(
+                        str(result["gemini_interpretation"])
+                    ),
+                },
+                merge=True,
+            )
+            logger.info(
+                "Automatically processed Drive PDF file_id=%s pages=%s extracted_characters=%s",
+                file_id,
+                result["page_count"],
+                len(result["extracted_text"]),
+            )
+            detected_changes.append({**event, "status": "processed"})
 
         page_token = result.get("nextPageToken")
         if page_token:
@@ -305,27 +354,22 @@ def find_test_folder():
 @app.post("/drive/process/{file_id}")
 def process_drive_pdf(file_id: str):
     """Download a Drive PDF, OCR and interpret it, then release its in-memory bytes."""
-    metadata, pdf_bytes = download_drive_pdf(get_drive_service(), file_id)
-    try:
-        extracted_text, page_count = extract_text_with_document_ai(pdf_bytes)
-        interpretation = interpret_text_with_gemini(extracted_text)
-    finally:
-        # Drop the raw document bytes as soon as both managed processing calls finish.
-        pdf_bytes = b""
+    result = process_drive_pdf_in_memory(get_drive_service(), file_id)
+    metadata = result["metadata"]
 
     logger.info(
         "Processed Drive PDF file_id=%s name=%s pages=%s extracted_characters=%s",
         metadata["id"],
         metadata.get("name"),
-        page_count,
-        len(extracted_text),
+        result["page_count"],
+        len(result["extracted_text"]),
     )
     return {
         "processed": True,
         "file": {"id": metadata["id"], "name": metadata.get("name")},
-        "page_count": page_count,
-        "extracted_text": extracted_text,
-        "gemini_interpretation": interpretation,
+        "page_count": result["page_count"],
+        "extracted_text": result["extracted_text"],
+        "gemini_interpretation": result["gemini_interpretation"],
     }
 
 
