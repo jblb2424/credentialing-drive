@@ -251,7 +251,8 @@ def start_drive_watch():
 
 @app.post("/drive/watch/renew")
 def renew_drive_watch(request: Request):
-    expected_token = os.environ.get("DRIVE_WATCH_RENEWAL_TOKEN")
+    # Secret Manager values created from command output can include a trailing newline.
+    expected_token = os.environ.get("DRIVE_WATCH_RENEWAL_TOKEN", "").strip()
     provided_token = request.headers.get("x-renewal-token", "")
     if not expected_token or not secrets.compare_digest(provided_token, expected_token):
         raise HTTPException(status_code=401, detail="Invalid renewal token")
