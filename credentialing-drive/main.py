@@ -4,6 +4,7 @@ import uuid
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
+from google.api_core.exceptions import AlreadyExists
 from google.cloud import firestore
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -121,15 +122,23 @@ def process_drive_changes(service, connection):
             if folder_id not in file_data.get("parents", []) or file_data.get("trashed"):
                 continue
 
-            event_id = str(uuid.uuid4())
+            file_id = change.get("fileId")
+            if not file_id:
+                continue
+
             event = {
-                "file_id": change.get("fileId"),
+                "file_id": file_id,
                 "file_name": file_data.get("name"),
                 "mime_type": file_data.get("mimeType"),
                 "change_type": change.get("changeType"),
                 "status": "detected",
             }
-            client.collection(EVENT_COLLECTION).document(event_id).set(event)
+            # Use the Drive file ID as an idempotency key across overlapping watch channels.
+            event_ref = client.collection(EVENT_COLLECTION).document(f"drive-{file_id}")
+            try:
+                event_ref.create(event)
+            except AlreadyExists:
+                continue
             detected_changes.append(event)
 
         page_token = result.get("nextPageToken")
