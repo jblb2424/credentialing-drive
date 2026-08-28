@@ -4,3 +4,5 @@ google-api-python-client
 google-auth-oauthlib
 google-cloud-storage
 google-cloud-firestore
+google-cloud-documentai
+google-genai

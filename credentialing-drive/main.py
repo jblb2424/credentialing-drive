@@ -1,3 +1,5 @@
+import io
+import logging
 import os
 import secrets
 import uuid
@@ -5,12 +7,16 @@ import uuid
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from google.api_core.exceptions import AlreadyExists
-from google.cloud import firestore
+from google.api_core.client_options import ClientOptions
+from google import genai
+from google.cloud import documentai, firestore
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 
 app = FastAPI()
+logger = logging.getLogger(__name__)
 
 SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly",
@@ -21,6 +27,9 @@ SCOPES = [
 CONNECTION_ID = "default"
 CONNECTION_COLLECTION = "drive_connections"
 EVENT_COLLECTION = "drive_change_events"
+PDF_MIME_TYPE = "application/pdf"
+MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
+MAX_GEMINI_INPUT_CHARS = 100_000
 
 
 def get_connection_ref():
@@ -91,6 +100,81 @@ def get_webhook_url():
             detail="GOOGLE_DRIVE_WEBHOOK_URL is not configured",
         )
     return url
+
+
+def get_project_id():
+    project_id = os.environ.get("GCP_PROJECT_ID")
+    if not project_id:
+        raise HTTPException(status_code=500, detail="GCP_PROJECT_ID is not configured")
+    return project_id
+
+
+def download_drive_pdf(service, file_id):
+    metadata = (
+        service.files()
+        .get(fileId=file_id, fields="id,name,mimeType,size,trashed")
+        .execute()
+    )
+    if metadata.get("trashed"):
+        raise HTTPException(status_code=404, detail="Drive file is trashed")
+    if metadata.get("mimeType") != PDF_MIME_TYPE:
+        raise HTTPException(status_code=415, detail="Only PDF files are supported")
+
+    file_size = int(metadata.get("size", 0))
+    if file_size > MAX_DOCUMENT_BYTES:
+        raise HTTPException(status_code=413, detail="PDF exceeds the 20 MB processing limit")
+
+    buffer = io.BytesIO()
+    downloader = MediaIoBaseDownload(buffer, service.files().get_media(fileId=file_id))
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+
+    pdf_bytes = buffer.getvalue()
+    if len(pdf_bytes) > MAX_DOCUMENT_BYTES:
+        raise HTTPException(status_code=413, detail="PDF exceeds the 20 MB processing limit")
+    return metadata, pdf_bytes
+
+
+def extract_text_with_document_ai(pdf_bytes):
+    project_id = get_project_id()
+    location = os.environ.get("DOCUMENT_AI_LOCATION", "us")
+    processor_id = os.environ.get("DOCUMENT_AI_PROCESSOR_ID")
+    if not processor_id:
+        raise HTTPException(status_code=500, detail="DOCUMENT_AI_PROCESSOR_ID is not configured")
+
+    client = documentai.DocumentProcessorServiceClient(
+        client_options=ClientOptions(api_endpoint=f"{location}-documentai.googleapis.com")
+    )
+    request = documentai.ProcessRequest(
+        name=client.processor_path(project_id, location, processor_id),
+        raw_document=documentai.RawDocument(content=pdf_bytes, mime_type=PDF_MIME_TYPE),
+    )
+    document = client.process_document(request=request).document
+    return document.text, len(document.pages)
+
+
+def interpret_text_with_gemini(ocr_text):
+    if not ocr_text:
+        return {"document_type": "unknown", "summary": "No text extracted"}
+
+    prompt = """You interpret healthcare credentialing documents. Return JSON only with these keys:
+document_type, provider_name, npi, license_numbers, expiration_dates, and summary.
+Use null or empty arrays when a value is not present. Do not infer values that are not supported by the text.
+
+OCR text:
+"""
+    client = genai.Client(
+        vertexai=True,
+        project=get_project_id(),
+        location=os.environ.get("VERTEX_AI_LOCATION", "global"),
+    )
+    response = client.models.generate_content(
+        model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+        contents=prompt + ocr_text[:MAX_GEMINI_INPUT_CHARS],
+        config={"response_mime_type": "application/json", "temperature": 0},
+    )
+    return response.text
 
 
 def process_drive_changes(service, connection):
@@ -216,6 +300,33 @@ def find_test_folder():
     folder = folders[0]
     update_connection({"folder_id": folder["id"]})
     return {"folder": folder}
+
+
+@app.post("/drive/process/{file_id}")
+def process_drive_pdf(file_id: str):
+    """Download a Drive PDF, OCR and interpret it, then release its in-memory bytes."""
+    metadata, pdf_bytes = download_drive_pdf(get_drive_service(), file_id)
+    try:
+        extracted_text, page_count = extract_text_with_document_ai(pdf_bytes)
+        interpretation = interpret_text_with_gemini(extracted_text)
+    finally:
+        # Drop the raw document bytes as soon as both managed processing calls finish.
+        pdf_bytes = b""
+
+    logger.info(
+        "Processed Drive PDF file_id=%s name=%s pages=%s extracted_characters=%s",
+        metadata["id"],
+        metadata.get("name"),
+        page_count,
+        len(extracted_text),
+    )
+    return {
+        "processed": True,
+        "file": {"id": metadata["id"], "name": metadata.get("name")},
+        "page_count": page_count,
+        "extracted_text": extracted_text,
+        "gemini_interpretation": interpretation,
+    }
 
 
 @app.post("/drive/watch")
