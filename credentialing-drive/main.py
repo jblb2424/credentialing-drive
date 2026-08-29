@@ -34,6 +34,8 @@ CONNECTION_COLLECTION = "drive_connections"
 EVENT_COLLECTION = "drive_change_events"
 SOURCE_DOCUMENT_COLLECTION = "source_documents"
 SPREADSHEET_IMPORT_COLLECTION = "spreadsheet_imports"
+PROVIDER_COLLECTION = "providers"
+PROVIDER_IDENTITY_COLLECTION = "provider_identities"
 PDF_MIME_TYPE = "application/pdf"
 CSV_MIME_TYPE = "text/csv"
 XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -256,15 +258,23 @@ def provider_fields(fields):
         for key in ("first_name", "middle_name", "last_name")
         if fields.get(key)
     )
-    return {
-        "provider_name": provider_name or None,
-        "npi": str(fields["npi"]) if fields.get("npi") else None,
-        "credentials": fields.get("credentials"),
-        "entity_name": fields.get("entity_name"),
-        "group_name": fields.get("group_name"),
-        "locations": split_list(fields.get("locations")),
-        "payers": split_list(fields.get("payers")),
-    }
+    return normalize_provider_data(
+        {
+            "document_type": "Provider Onboarding Spreadsheet",
+            "entity_name": fields.get("entity_name"),
+            "group_name": fields.get("group_name"),
+            "provider": {
+                "name": provider_name or None,
+                "npi": str(fields["npi"]) if fields.get("npi") else None,
+                "credentials": fields.get("credentials"),
+            },
+            "locations": split_list(fields.get("locations")),
+            "payers": split_list(fields.get("payers")),
+            "licenses": split_list(fields.get("licenses")),
+            "expiration_dates": split_list(fields.get("expiration_dates")),
+            "summary": None,
+        }
+    )
 
 
 def save_spreadsheet_import(metadata, rows):
@@ -286,12 +296,28 @@ def save_spreadsheet_import(metadata, rows):
     )
 
     for row in rows:
+        source_document_id = f"drive-{metadata['id']}-row-{row['row_number']}"
+        normalized_provider = provider_fields(row["fields"])
+        provider_id = upsert_normalized_provider(normalized_provider, source_document_id)
+        client.collection(SOURCE_DOCUMENT_COLLECTION).document(source_document_id).set(
+            {
+                "drive_file_id": metadata["id"],
+                "file_name": metadata.get("name"),
+                "mime_type": metadata.get("mimeType"),
+                "spreadsheet_row_number": row["row_number"],
+                "status": "normalized" if provider_id else "pending_provider_identity",
+                "structured_data": normalized_provider,
+                "provider_id": provider_id,
+                "processed_at": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
         import_ref.collection("provider_rows").document(f"row-{row['row_number']}").set(
             {
                 "row_number": row["row_number"],
-                "provider": provider_fields(row["fields"]),
+                "provider_id": provider_id,
                 "source_fields": row["fields"],
-                "status": "pending_assignment",
+                "status": "normalized" if provider_id else "pending_provider_identity",
             },
             merge=True,
         )
@@ -362,23 +388,132 @@ def parse_gemini_extraction(interpretation):
     return parsed
 
 
+def normalized_key(value):
+    return re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-")
+
+
+def normalize_provider_data(extraction):
+    provider = extraction.get("provider") or {}
+    if not isinstance(provider, dict):
+        provider = {"name": str(provider)}
+
+    name = provider.get("name") or extraction.get("provider_name")
+    npi = provider.get("npi") or extraction.get("npi")
+    return {
+        "document_type": extraction.get("document_type") or "unknown",
+        "entity_name": extraction.get("entity_name"),
+        "group_name": extraction.get("group_name"),
+        "provider": {
+            "name": name,
+            "npi": str(npi) if npi else None,
+            "credentials": provider.get("credentials") or extraction.get("credentials"),
+        },
+        "locations": extraction.get("locations") or [],
+        "payers": extraction.get("payers") or [],
+        "licenses": extraction.get("licenses") or [],
+        "expiration_dates": extraction.get("expiration_dates") or [],
+        "summary": extraction.get("summary"),
+    }
+
+
+def resolve_provider_id(client, provider):
+    name_key = normalized_key(provider["provider"].get("name"))
+    entity_key = normalized_key(provider.get("entity_name"))
+    npi = re.sub(r"\D", "", provider["provider"].get("npi") or "")
+    if not npi and not name_key:
+        return None
+
+    identity_keys = []
+    if npi:
+        identity_keys.append(f"npi-{npi}")
+    if name_key:
+        identity_keys.append(f"name-{entity_key or 'unknown'}-{name_key}")
+
+    for identity_key in identity_keys:
+        snapshot = client.collection(PROVIDER_IDENTITY_COLLECTION).document(identity_key).get()
+        if snapshot.exists:
+            provider_id = snapshot.to_dict()["provider_id"]
+            for alias_key in identity_keys:
+                client.collection(PROVIDER_IDENTITY_COLLECTION).document(alias_key).set(
+                    {"provider_id": provider_id}, merge=True
+                )
+            return provider_id
+
+    provider_id = identity_keys[0]
+    for identity_key in identity_keys:
+        client.collection(PROVIDER_IDENTITY_COLLECTION).document(identity_key).set(
+            {"provider_id": provider_id}, merge=True
+        )
+    return provider_id
+
+
+def merge_unique(existing, incoming):
+    values = list(existing or [])
+    for value in incoming or []:
+        if value and value not in values:
+            values.append(value)
+    return values
+
+
+def upsert_normalized_provider(provider, source_document_id):
+    database = os.environ.get("FIRESTORE_DATABASE", "healthcare-credentialing")
+    client = firestore.Client(database=database)
+    provider_id = resolve_provider_id(client, provider)
+    if not provider_id:
+        return None
+
+    provider_ref = client.collection(PROVIDER_COLLECTION).document(provider_id)
+    existing = provider_ref.get().to_dict() or {}
+    existing_profile = existing.get("provider") or {}
+    incoming_profile = provider["provider"]
+    merged_profile = {
+        key: incoming_profile.get(key) or existing_profile.get(key)
+        for key in ("name", "npi", "credentials")
+    }
+    provider_ref.set(
+        {
+            "document_type": provider.get("document_type") or existing.get("document_type"),
+            "entity_name": provider.get("entity_name") or existing.get("entity_name"),
+            "group_name": provider.get("group_name") or existing.get("group_name"),
+            "provider": merged_profile,
+            "locations": merge_unique(existing.get("locations"), provider.get("locations")),
+            "payers": merge_unique(existing.get("payers"), provider.get("payers")),
+            "licenses": merge_unique(existing.get("licenses"), provider.get("licenses")),
+            "expiration_dates": merge_unique(
+                existing.get("expiration_dates"), provider.get("expiration_dates")
+            ),
+        },
+        merge=True,
+    )
+    provider_ref.collection("sources").document(source_document_id).set(
+        {"source_document_id": source_document_id, "linked_at": firestore.SERVER_TIMESTAMP},
+        merge=True,
+    )
+    return provider_id
+
+
 def save_structured_document(metadata, page_count, extraction):
     database = os.environ.get("FIRESTORE_DATABASE", "healthcare-credentialing")
     client = firestore.Client(database=database)
+    source_document_id = f"drive-{metadata['id']}"
+    provider = normalize_provider_data(extraction)
+    provider_id = upsert_normalized_provider(provider, source_document_id)
     # A Drive file ID is stable across retries, so this write is naturally idempotent.
-    client.collection(SOURCE_DOCUMENT_COLLECTION).document(f"drive-{metadata['id']}").set(
+    client.collection(SOURCE_DOCUMENT_COLLECTION).document(source_document_id).set(
         {
             "drive_file_id": metadata["id"],
             "file_name": metadata.get("name"),
             "mime_type": metadata.get("mimeType"),
             "page_count": page_count,
-            "status": "extracted_pending_assignment",
+            "status": "normalized" if provider_id else "extracted_pending_provider",
             "extraction_version": "v1",
             "structured_data": extraction,
+            "provider_id": provider_id,
             "processed_at": firestore.SERVER_TIMESTAMP,
         },
         merge=True,
     )
+    return provider_id
 
 
 def process_drive_pdf_in_memory(service, file_id):
