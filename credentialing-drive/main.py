@@ -1,4 +1,5 @@
 import io
+import json
 import logging
 import os
 import secrets
@@ -27,6 +28,7 @@ SCOPES = [
 CONNECTION_ID = "default"
 CONNECTION_COLLECTION = "drive_connections"
 EVENT_COLLECTION = "drive_change_events"
+SOURCE_DOCUMENT_COLLECTION = "source_documents"
 PDF_MIME_TYPE = "application/pdf"
 MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
 MAX_GEMINI_INPUT_CHARS = 100_000
@@ -159,7 +161,8 @@ def interpret_text_with_gemini(ocr_text):
         return {"document_type": "unknown", "summary": "No text extracted"}
 
     prompt = """You interpret healthcare credentialing documents. Return JSON only with these keys:
-document_type, provider_name, npi, license_numbers, expiration_dates, and summary.
+document_type, entity_name, group_name, provider, locations, payers, licenses, expiration_dates, and summary.
+`provider` must be an object with name, npi, and credentials. `locations`, `payers`, and `licenses` must be arrays.
 Use null or empty arrays when a value is not present. Do not infer values that are not supported by the text.
 
 OCR text:
@@ -177,6 +180,37 @@ OCR text:
     return response.text
 
 
+def parse_gemini_extraction(interpretation):
+    if isinstance(interpretation, dict):
+        return interpretation
+    try:
+        parsed = json.loads(interpretation)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=502, detail="Gemini returned invalid structured output")
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=502, detail="Gemini returned an unexpected response")
+    return parsed
+
+
+def save_structured_document(metadata, page_count, extraction):
+    database = os.environ.get("FIRESTORE_DATABASE", "healthcare-credentialing")
+    client = firestore.Client(database=database)
+    # A Drive file ID is stable across retries, so this write is naturally idempotent.
+    client.collection(SOURCE_DOCUMENT_COLLECTION).document(f"drive-{metadata['id']}").set(
+        {
+            "drive_file_id": metadata["id"],
+            "file_name": metadata.get("name"),
+            "mime_type": metadata.get("mimeType"),
+            "page_count": page_count,
+            "status": "extracted_pending_assignment",
+            "extraction_version": "v1",
+            "structured_data": extraction,
+            "processed_at": firestore.SERVER_TIMESTAMP,
+        },
+        merge=True,
+    )
+
+
 def process_drive_pdf_in_memory(service, file_id):
     metadata, pdf_bytes = download_drive_pdf(service, file_id)
     try:
@@ -186,11 +220,13 @@ def process_drive_pdf_in_memory(service, file_id):
         # Release the raw source document immediately after managed processing.
         pdf_bytes = b""
 
+    extraction = parse_gemini_extraction(interpretation)
+    save_structured_document(metadata, page_count, extraction)
     return {
         "metadata": metadata,
         "page_count": page_count,
         "extracted_text": extracted_text,
-        "gemini_interpretation": interpretation,
+        "gemini_interpretation": extraction,
     }
 
 
