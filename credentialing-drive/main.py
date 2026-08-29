@@ -2,8 +2,11 @@ import io
 import json
 import logging
 import os
+import csv
+import re
 import secrets
 import uuid
+from datetime import date, datetime
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
@@ -15,6 +18,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
+from openpyxl import load_workbook
 
 app = FastAPI()
 logger = logging.getLogger(__name__)
@@ -29,9 +33,33 @@ CONNECTION_ID = "default"
 CONNECTION_COLLECTION = "drive_connections"
 EVENT_COLLECTION = "drive_change_events"
 SOURCE_DOCUMENT_COLLECTION = "source_documents"
+SPREADSHEET_IMPORT_COLLECTION = "spreadsheet_imports"
 PDF_MIME_TYPE = "application/pdf"
+CSV_MIME_TYPE = "text/csv"
+XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+GOOGLE_SHEETS_MIME_TYPE = "application/vnd.google-apps.spreadsheet"
+SPREADSHEET_MIME_TYPES = {CSV_MIME_TYPE, XLSX_MIME_TYPE, GOOGLE_SHEETS_MIME_TYPE}
 MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
+MAX_SPREADSHEET_BYTES = 10 * 1024 * 1024
 MAX_GEMINI_INPUT_CHARS = 100_000
+
+HEADER_ALIASES = {
+    "entity": "entity_name",
+    "entity name": "entity_name",
+    "group": "group_name",
+    "group name": "group_name",
+    "provider name": "provider_name",
+    "provider full name": "provider_name",
+    "first name": "first_name",
+    "last name": "last_name",
+    "middle name": "middle_name",
+    "npi number": "npi",
+    "provider npi": "npi",
+    "credential": "credentials",
+    "locations": "locations",
+    "payers": "payers",
+    "insurances": "payers",
+}
 
 
 def get_connection_ref():
@@ -136,6 +164,148 @@ def download_drive_pdf(service, file_id):
     if len(pdf_bytes) > MAX_DOCUMENT_BYTES:
         raise HTTPException(status_code=413, detail="PDF exceeds the 20 MB processing limit")
     return metadata, pdf_bytes
+
+
+def download_drive_spreadsheet(service, file_id):
+    metadata = (
+        service.files()
+        .get(fileId=file_id, fields="id,name,mimeType,size,trashed")
+        .execute()
+    )
+    if metadata.get("trashed"):
+        raise HTTPException(status_code=404, detail="Drive file is trashed")
+    if metadata.get("mimeType") not in SPREADSHEET_MIME_TYPES:
+        raise HTTPException(status_code=415, detail="Unsupported spreadsheet format")
+    if int(metadata.get("size", 0)) > MAX_SPREADSHEET_BYTES:
+        raise HTTPException(
+            status_code=413, detail="Spreadsheet exceeds the 10 MB processing limit"
+        )
+
+    if metadata["mimeType"] == GOOGLE_SHEETS_MIME_TYPE:
+        request = service.files().export_media(fileId=file_id, mimeType=CSV_MIME_TYPE)
+    else:
+        request = service.files().get_media(fileId=file_id)
+
+    buffer = io.BytesIO()
+    downloader = MediaIoBaseDownload(buffer, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+
+    spreadsheet_bytes = buffer.getvalue()
+    if len(spreadsheet_bytes) > MAX_SPREADSHEET_BYTES:
+        raise HTTPException(
+            status_code=413, detail="Spreadsheet exceeds the 10 MB processing limit"
+        )
+    return metadata, spreadsheet_bytes
+
+
+def normalize_header(value):
+    header = re.sub(r"\s+", " ", str(value or "").strip().lower())
+    return HEADER_ALIASES.get(header, re.sub(r"[^a-z0-9]+", "_", header).strip("_"))
+
+
+def normalize_cell(value):
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    return value.strip() if isinstance(value, str) else value
+
+
+def parse_rows(headers, rows):
+    normalized_headers = [normalize_header(header) for header in headers]
+    if not any(normalized_headers):
+        raise HTTPException(status_code=422, detail="Spreadsheet must include a header row")
+
+    parsed_rows = []
+    for row_number, values in rows:
+        fields = {
+            header: normalize_cell(value)
+            for header, value in zip(normalized_headers, values)
+            if header and value not in (None, "")
+        }
+        if fields:
+            parsed_rows.append({"row_number": row_number, "fields": fields})
+    return parsed_rows
+
+
+def parse_spreadsheet(spreadsheet_bytes, mime_type):
+    if mime_type in {CSV_MIME_TYPE, GOOGLE_SHEETS_MIME_TYPE}:
+        csv_rows = list(csv.reader(io.StringIO(spreadsheet_bytes.decode("utf-8-sig"))))
+        if not csv_rows:
+            return []
+        return parse_rows(csv_rows[0], enumerate(csv_rows[1:], start=2))
+
+    workbook = load_workbook(io.BytesIO(spreadsheet_bytes), read_only=True, data_only=True)
+    worksheet = workbook.active
+    rows = worksheet.iter_rows(values_only=True)
+    headers = next(rows, None)
+    if headers is None:
+        return []
+    return parse_rows(headers, enumerate(rows, start=2))
+
+
+def split_list(value):
+    if not value:
+        return []
+    return [item.strip() for item in re.split(r"[;,|]", str(value)) if item.strip()]
+
+
+def provider_fields(fields):
+    provider_name = fields.get("provider_name") or " ".join(
+        str(fields.get(key, "")).strip()
+        for key in ("first_name", "middle_name", "last_name")
+        if fields.get(key)
+    )
+    return {
+        "provider_name": provider_name or None,
+        "npi": str(fields["npi"]) if fields.get("npi") else None,
+        "credentials": fields.get("credentials"),
+        "entity_name": fields.get("entity_name"),
+        "group_name": fields.get("group_name"),
+        "locations": split_list(fields.get("locations")),
+        "payers": split_list(fields.get("payers")),
+    }
+
+
+def save_spreadsheet_import(metadata, rows):
+    database = os.environ.get("FIRESTORE_DATABASE", "healthcare-credentialing")
+    client = firestore.Client(database=database)
+    import_ref = client.collection(SPREADSHEET_IMPORT_COLLECTION).document(
+        f"drive-{metadata['id']}"
+    )
+    import_ref.set(
+        {
+            "drive_file_id": metadata["id"],
+            "file_name": metadata.get("name"),
+            "mime_type": metadata.get("mimeType"),
+            "status": "imported_pending_assignment",
+            "provider_row_count": len(rows),
+            "imported_at": firestore.SERVER_TIMESTAMP,
+        },
+        merge=True,
+    )
+
+    for row in rows:
+        import_ref.collection("provider_rows").document(f"row-{row['row_number']}").set(
+            {
+                "row_number": row["row_number"],
+                "provider": provider_fields(row["fields"]),
+                "source_fields": row["fields"],
+                "status": "pending_assignment",
+            },
+            merge=True,
+        )
+
+
+def process_drive_spreadsheet_in_memory(service, file_id):
+    metadata, spreadsheet_bytes = download_drive_spreadsheet(service, file_id)
+    try:
+        rows = parse_spreadsheet(spreadsheet_bytes, metadata["mimeType"])
+        save_spreadsheet_import(metadata, rows)
+    finally:
+        # Raw spreadsheet bytes are never persisted.
+        spreadsheet_bytes = b""
+    return {"metadata": metadata, "provider_row_count": len(rows)}
 
 
 def extract_text_with_document_ai(pdf_bytes):
@@ -275,6 +445,25 @@ def process_drive_changes(service, connection):
             try:
                 event_ref.create(event)
             except AlreadyExists:
+                continue
+
+            if event["mime_type"] in SPREADSHEET_MIME_TYPES:
+                try:
+                    result = process_drive_spreadsheet_in_memory(service, file_id)
+                except Exception:
+                    logger.exception("Spreadsheet import failed for Drive file_id=%s", file_id)
+                    event_ref.set({"status": "failed"}, merge=True)
+                    detected_changes.append({**event, "status": "failed"})
+                    continue
+
+                event_ref.set(
+                    {
+                        "status": "imported",
+                        "provider_row_count": result["provider_row_count"],
+                    },
+                    merge=True,
+                )
+                detected_changes.append({**event, "status": "imported"})
                 continue
 
             if event["mime_type"] != PDF_MIME_TYPE:
