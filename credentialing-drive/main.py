@@ -32,8 +32,6 @@ SCOPES = [
 CONNECTION_ID = "default"
 CONNECTION_COLLECTION = "drive_connections"
 EVENT_COLLECTION = "drive_change_events"
-SOURCE_DOCUMENT_COLLECTION = "source_documents"
-SPREADSHEET_IMPORT_COLLECTION = "spreadsheet_imports"
 PROVIDER_COLLECTION = "providers"
 PROVIDER_IDENTITY_COLLECTION = "provider_identities"
 BIGQUERY_REPORTING_DATASET = "credentialing_reporting"
@@ -236,57 +234,15 @@ def split_list(value):
     return [item.strip() for item in re.split(r"[;,|]", str(value)) if item.strip()]
 
 
-def save_spreadsheet_import(metadata, rows, providers):
-    database = os.environ.get("FIRESTORE_DATABASE", "healthcare-credentialing")
-    client = firestore.Client(database=database)
-    import_ref = client.collection(SPREADSHEET_IMPORT_COLLECTION).document(
-        f"drive-{metadata['id']}"
-    )
-    import_ref.set(
-        {
-            "drive_file_id": metadata["id"],
-            "file_name": metadata.get("name"),
-            "mime_type": metadata.get("mimeType"),
-            "status": "imported_pending_assignment",
-            "source_row_count": len(rows),
-            "provider_count": len(providers),
-            "imported_at": firestore.SERVER_TIMESTAMP,
-        },
-        merge=True,
-    )
-
-    source_rows = {row["row_number"]: row["fields"] for row in rows}
-    for provider_index, extracted_provider in enumerate(providers, start=1):
+def save_spreadsheet_providers(metadata, providers):
+    for extracted_provider in providers:
         source_row_numbers = extracted_provider.pop("source_row_numbers", [])
-        source_document_id = f"drive-{metadata['id']}-provider-{provider_index}"
         normalized_provider = normalize_provider_data(extracted_provider)
-        provider_id = upsert_normalized_provider(normalized_provider, source_document_id)
-        client.collection(SOURCE_DOCUMENT_COLLECTION).document(source_document_id).set(
-            {
-                "drive_file_id": metadata["id"],
-                "file_name": metadata.get("name"),
-                "mime_type": metadata.get("mimeType"),
-                "spreadsheet_row_numbers": source_row_numbers,
-                "status": "normalized" if provider_id else "pending_provider_identity",
-                "structured_data": normalized_provider,
-                "provider_id": provider_id,
-                "processed_at": firestore.SERVER_TIMESTAMP,
-            },
-            merge=True,
+        upsert_normalized_provider(
+            normalized_provider,
+            metadata,
+            spreadsheet_row_numbers=source_row_numbers,
         )
-        for row_number in source_row_numbers:
-            if row_number not in source_rows:
-                continue
-            import_ref.collection("provider_rows").document(f"row-{row_number}").set(
-                {
-                    "row_number": row_number,
-                    "provider_id": provider_id,
-                    "source_document_id": source_document_id,
-                    "source_fields": source_rows[row_number],
-                    "status": "normalized" if provider_id else "pending_provider_identity",
-                },
-                merge=True,
-            )
 
 
 def process_drive_spreadsheet_in_memory(service, file_id):
@@ -294,7 +250,7 @@ def process_drive_spreadsheet_in_memory(service, file_id):
     try:
         rows = parse_spreadsheet(spreadsheet_bytes, metadata["mimeType"])
         providers = interpret_spreadsheet_with_gemini(rows)
-        save_spreadsheet_import(metadata, rows, providers)
+        save_spreadsheet_providers(metadata, providers)
     finally:
         # Raw spreadsheet bytes are never persisted.
         spreadsheet_bytes = b""
@@ -545,7 +501,22 @@ def sync_provider_to_bigquery(provider_id, provider):
         raise RuntimeError(f"BigQuery provider sync failed: {errors}")
 
 
-def upsert_normalized_provider(provider, source_document_id):
+def record_provider_revision(provider_ref, metadata, spreadsheet_row_numbers=None):
+    revision = {
+        "drive_file_id": metadata["id"],
+        "file_name": metadata.get("name"),
+        "mime_type": metadata.get("mimeType"),
+        "recorded_at": firestore.SERVER_TIMESTAMP,
+    }
+    if spreadsheet_row_numbers is not None:
+        revision["spreadsheet_row_numbers"] = spreadsheet_row_numbers
+    provider_ref.collection("revisions").document(f"drive-{metadata['id']}").set(
+        revision,
+        merge=True,
+    )
+
+
+def upsert_normalized_provider(provider, metadata, spreadsheet_row_numbers=None):
     database = os.environ.get("FIRESTORE_DATABASE", "healthcare-credentialing")
     client = firestore.Client(database=database)
     provider_id = resolve_provider_id(client, provider)
@@ -571,11 +542,12 @@ def upsert_normalized_provider(provider, source_document_id):
             "expiration_dates": merge_unique(
                 existing.get("expiration_dates"), provider.get("expiration_dates")
             ),
-        }
+    }
     provider_ref.set(canonical_provider, merge=True)
-    provider_ref.collection("sources").document(source_document_id).set(
-        {"source_document_id": source_document_id, "linked_at": firestore.SERVER_TIMESTAMP},
-        merge=True,
+    record_provider_revision(
+        provider_ref,
+        metadata,
+        spreadsheet_row_numbers=spreadsheet_row_numbers,
     )
     try:
         sync_provider_to_bigquery(provider_id, canonical_provider)
@@ -585,28 +557,9 @@ def upsert_normalized_provider(provider, source_document_id):
     return provider_id
 
 
-def save_structured_document(metadata, page_count, extraction):
-    database = os.environ.get("FIRESTORE_DATABASE", "healthcare-credentialing")
-    client = firestore.Client(database=database)
-    source_document_id = f"drive-{metadata['id']}"
+def save_pdf_provider(metadata, extraction):
     provider = normalize_provider_data(extraction)
-    provider_id = upsert_normalized_provider(provider, source_document_id)
-    # A Drive file ID is stable across retries, so this write is naturally idempotent.
-    client.collection(SOURCE_DOCUMENT_COLLECTION).document(source_document_id).set(
-        {
-            "drive_file_id": metadata["id"],
-            "file_name": metadata.get("name"),
-            "mime_type": metadata.get("mimeType"),
-            "page_count": page_count,
-            "status": "normalized" if provider_id else "extracted_pending_provider",
-            "extraction_version": "v1",
-            "structured_data": extraction,
-            "provider_id": provider_id,
-            "processed_at": firestore.SERVER_TIMESTAMP,
-        },
-        merge=True,
-    )
-    return provider_id
+    return upsert_normalized_provider(provider, metadata)
 
 
 def process_drive_pdf_in_memory(service, file_id):
@@ -619,7 +572,7 @@ def process_drive_pdf_in_memory(service, file_id):
         pdf_bytes = b""
 
     extraction = parse_gemini_extraction(interpretation)
-    save_structured_document(metadata, page_count, extraction)
+    save_pdf_provider(metadata, extraction)
     return {
         "metadata": metadata,
         "page_count": page_count,
