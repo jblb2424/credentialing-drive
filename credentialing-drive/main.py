@@ -6,14 +6,14 @@ import csv
 import re
 import secrets
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from google.api_core.exceptions import AlreadyExists
 from google.api_core.client_options import ClientOptions
 from google import genai
-from google.cloud import documentai, firestore
+from google.cloud import bigquery, documentai, firestore
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
@@ -36,6 +36,8 @@ SOURCE_DOCUMENT_COLLECTION = "source_documents"
 SPREADSHEET_IMPORT_COLLECTION = "spreadsheet_imports"
 PROVIDER_COLLECTION = "providers"
 PROVIDER_IDENTITY_COLLECTION = "provider_identities"
+BIGQUERY_REPORTING_DATASET = "credentialing_reporting"
+BIGQUERY_REPORTING_TABLE = "provider_reporting_events"
 PDF_MIME_TYPE = "application/pdf"
 CSV_MIME_TYPE = "text/csv"
 XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -455,6 +457,40 @@ def merge_unique(existing, incoming):
     return values
 
 
+def reporting_values(values):
+    return [
+        json.dumps(value, sort_keys=True) if isinstance(value, (dict, list)) else str(value)
+        for value in values or []
+        if value is not None
+    ]
+
+
+def sync_provider_to_bigquery(provider_id, provider):
+    project_id = get_project_id()
+    dataset = os.environ.get("BIGQUERY_REPORTING_DATASET", BIGQUERY_REPORTING_DATASET)
+    table_id = f"{project_id}.{dataset}.{BIGQUERY_REPORTING_TABLE}"
+    profile = provider["provider"]
+    row = {
+        "provider_id": provider_id,
+        "document_type": provider.get("document_type"),
+        "entity_name": provider.get("entity_name"),
+        "group_name": provider.get("group_name"),
+        "provider_name": profile.get("name"),
+        "npi": profile.get("npi"),
+        "credentials": profile.get("credentials"),
+        "locations": reporting_values(provider.get("locations")),
+        "payers": reporting_values(provider.get("payers")),
+        "licenses": reporting_values(provider.get("licenses")),
+        "expiration_dates": reporting_values(provider.get("expiration_dates")),
+        "synced_at": datetime.now(timezone.utc).isoformat(),
+    }
+    errors = bigquery.Client(project=project_id).insert_rows_json(
+        table_id, [row], row_ids=[f"{provider_id}-{uuid.uuid4()}"]
+    )
+    if errors:
+        raise RuntimeError(f"BigQuery provider sync failed: {errors}")
+
+
 def upsert_normalized_provider(provider, source_document_id):
     database = os.environ.get("FIRESTORE_DATABASE", "healthcare-credentialing")
     client = firestore.Client(database=database)
@@ -470,8 +506,7 @@ def upsert_normalized_provider(provider, source_document_id):
         key: incoming_profile.get(key) or existing_profile.get(key)
         for key in ("name", "npi", "credentials")
     }
-    provider_ref.set(
-        {
+    canonical_provider = {
             "document_type": provider.get("document_type") or existing.get("document_type"),
             "entity_name": provider.get("entity_name") or existing.get("entity_name"),
             "group_name": provider.get("group_name") or existing.get("group_name"),
@@ -482,13 +517,17 @@ def upsert_normalized_provider(provider, source_document_id):
             "expiration_dates": merge_unique(
                 existing.get("expiration_dates"), provider.get("expiration_dates")
             ),
-        },
-        merge=True,
-    )
+        }
+    provider_ref.set(canonical_provider, merge=True)
     provider_ref.collection("sources").document(source_document_id).set(
         {"source_document_id": source_document_id, "linked_at": firestore.SERVER_TIMESTAMP},
         merge=True,
     )
+    try:
+        sync_provider_to_bigquery(provider_id, canonical_provider)
+    except Exception:
+        # Firestore remains the system of record if reporting is temporarily unavailable.
+        logger.exception("BigQuery provider sync failed for provider_id=%s", provider_id)
     return provider_id
 
 
