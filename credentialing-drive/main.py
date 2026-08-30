@@ -47,25 +47,6 @@ MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
 MAX_SPREADSHEET_BYTES = 10 * 1024 * 1024
 MAX_GEMINI_INPUT_CHARS = 100_000
 
-HEADER_ALIASES = {
-    "entity": "entity_name",
-    "entity name": "entity_name",
-    "group": "group_name",
-    "group name": "group_name",
-    "provider name": "provider_name",
-    "provider full name": "provider_name",
-    "first name": "first_name",
-    "last name": "last_name",
-    "middle name": "middle_name",
-    "npi number": "npi",
-    "provider npi": "npi",
-    "credential": "credentials",
-    "locations": "locations",
-    "payers": "payers",
-    "insurances": "payers",
-}
-
-
 def get_connection_ref():
     database = os.environ.get("FIRESTORE_DATABASE", "healthcare-credentialing")
     client = firestore.Client(database=database)
@@ -204,11 +185,6 @@ def download_drive_spreadsheet(service, file_id):
     return metadata, spreadsheet_bytes
 
 
-def normalize_header(value):
-    header = re.sub(r"\s+", " ", str(value or "").strip().lower())
-    return HEADER_ALIASES.get(header, re.sub(r"[^a-z0-9]+", "_", header).strip("_"))
-
-
 def normalize_cell(value):
     if isinstance(value, (date, datetime)):
         return value.isoformat()
@@ -216,16 +192,22 @@ def normalize_cell(value):
 
 
 def parse_rows(headers, rows):
-    normalized_headers = [normalize_header(header) for header in headers]
-    if not any(normalized_headers):
-        raise HTTPException(status_code=422, detail="Spreadsheet must include a header row")
+    raw_headers = []
+    used_headers = set()
+    for index, header in enumerate(headers, start=1):
+        base_header = str(header or "").strip() or f"Column {index}"
+        unique_header = base_header
+        while unique_header in used_headers:
+            unique_header = f"{base_header} ({index})"
+        raw_headers.append(unique_header)
+        used_headers.add(unique_header)
 
     parsed_rows = []
     for row_number, values in rows:
         fields = {
-            header: normalize_cell(value)
-            for header, value in zip(normalized_headers, values)
-            if header and value not in (None, "")
+            header or f"Column {index}": normalize_cell(value)
+            for index, (header, value) in enumerate(zip(raw_headers, values), start=1)
+            if value not in (None, "")
         }
         if fields:
             parsed_rows.append({"row_number": row_number, "fields": fields})
@@ -254,32 +236,7 @@ def split_list(value):
     return [item.strip() for item in re.split(r"[;,|]", str(value)) if item.strip()]
 
 
-def provider_fields(fields):
-    provider_name = fields.get("provider_name") or " ".join(
-        str(fields.get(key, "")).strip()
-        for key in ("first_name", "middle_name", "last_name")
-        if fields.get(key)
-    )
-    return normalize_provider_data(
-        {
-            "document_type": "Provider Onboarding Spreadsheet",
-            "entity_name": fields.get("entity_name"),
-            "group_name": fields.get("group_name"),
-            "provider": {
-                "name": provider_name or None,
-                "npi": str(fields["npi"]) if fields.get("npi") else None,
-                "credentials": fields.get("credentials"),
-            },
-            "locations": split_list(fields.get("locations")),
-            "payers": split_list(fields.get("payers")),
-            "licenses": split_list(fields.get("licenses")),
-            "expiration_dates": split_list(fields.get("expiration_dates")),
-            "summary": None,
-        }
-    )
-
-
-def save_spreadsheet_import(metadata, rows):
+def save_spreadsheet_import(metadata, rows, providers):
     database = os.environ.get("FIRESTORE_DATABASE", "healthcare-credentialing")
     client = firestore.Client(database=database)
     import_ref = client.collection(SPREADSHEET_IMPORT_COLLECTION).document(
@@ -291,22 +248,25 @@ def save_spreadsheet_import(metadata, rows):
             "file_name": metadata.get("name"),
             "mime_type": metadata.get("mimeType"),
             "status": "imported_pending_assignment",
-            "provider_row_count": len(rows),
+            "source_row_count": len(rows),
+            "provider_count": len(providers),
             "imported_at": firestore.SERVER_TIMESTAMP,
         },
         merge=True,
     )
 
-    for row in rows:
-        source_document_id = f"drive-{metadata['id']}-row-{row['row_number']}"
-        normalized_provider = provider_fields(row["fields"])
+    source_rows = {row["row_number"]: row["fields"] for row in rows}
+    for provider_index, extracted_provider in enumerate(providers, start=1):
+        source_row_numbers = extracted_provider.pop("source_row_numbers", [])
+        source_document_id = f"drive-{metadata['id']}-provider-{provider_index}"
+        normalized_provider = normalize_provider_data(extracted_provider)
         provider_id = upsert_normalized_provider(normalized_provider, source_document_id)
         client.collection(SOURCE_DOCUMENT_COLLECTION).document(source_document_id).set(
             {
                 "drive_file_id": metadata["id"],
                 "file_name": metadata.get("name"),
                 "mime_type": metadata.get("mimeType"),
-                "spreadsheet_row_number": row["row_number"],
+                "spreadsheet_row_numbers": source_row_numbers,
                 "status": "normalized" if provider_id else "pending_provider_identity",
                 "structured_data": normalized_provider,
                 "provider_id": provider_id,
@@ -314,26 +274,35 @@ def save_spreadsheet_import(metadata, rows):
             },
             merge=True,
         )
-        import_ref.collection("provider_rows").document(f"row-{row['row_number']}").set(
-            {
-                "row_number": row["row_number"],
-                "provider_id": provider_id,
-                "source_fields": row["fields"],
-                "status": "normalized" if provider_id else "pending_provider_identity",
-            },
-            merge=True,
-        )
+        for row_number in source_row_numbers:
+            if row_number not in source_rows:
+                continue
+            import_ref.collection("provider_rows").document(f"row-{row_number}").set(
+                {
+                    "row_number": row_number,
+                    "provider_id": provider_id,
+                    "source_document_id": source_document_id,
+                    "source_fields": source_rows[row_number],
+                    "status": "normalized" if provider_id else "pending_provider_identity",
+                },
+                merge=True,
+            )
 
 
 def process_drive_spreadsheet_in_memory(service, file_id):
     metadata, spreadsheet_bytes = download_drive_spreadsheet(service, file_id)
     try:
         rows = parse_spreadsheet(spreadsheet_bytes, metadata["mimeType"])
-        save_spreadsheet_import(metadata, rows)
+        providers = interpret_spreadsheet_with_gemini(rows)
+        save_spreadsheet_import(metadata, rows, providers)
     finally:
         # Raw spreadsheet bytes are never persisted.
         spreadsheet_bytes = b""
-    return {"metadata": metadata, "provider_row_count": len(rows)}
+    return {
+        "metadata": metadata,
+        "source_row_count": len(rows),
+        "provider_count": len(providers),
+    }
 
 
 def extract_text_with_document_ai(pdf_bytes):
@@ -378,6 +347,59 @@ OCR text:
     return response.text
 
 
+def interpret_spreadsheet_with_gemini(rows):
+    if not rows:
+        return []
+
+    prompt = """You interpret healthcare credentialing onboarding spreadsheets with
+unknown column names and layouts. Return JSON only in this shape:
+{"providers": [{"source_row_numbers": [2], "document_type": "...",
+"entity_name": null, "group_name": null,
+"provider": {"name": null, "npi": null, "credentials": null},
+"locations": [], "payers": [], "licenses": [], "expiration_dates": [],
+"summary": null}]}
+
+Normalize every provider represented in the spreadsheet into this canonical shape.
+Use the original row numbers that support each provider in source_row_numbers. A provider
+may use multiple rows when the layout requires it. Do not infer values that are not in the
+spreadsheet, do not include a provider without a name or NPI, and use null or [] for unknown
+values. Preserve all meaningful payer, location, license, and expiration information.
+
+Spreadsheet rows (each object contains an original row_number and raw, client-supplied columns):
+"""
+    client = genai.Client(
+        vertexai=True,
+        project=get_project_id(),
+        location=os.environ.get("VERTEX_AI_LOCATION", "global"),
+    )
+    max_batch_chars = MAX_GEMINI_INPUT_CHARS - len(prompt)
+    batches = []
+    batch = []
+    batch_chars = 2
+    for row in rows:
+        row_json = json.dumps(row, default=str)
+        if len(row_json) > max_batch_chars:
+            raise HTTPException(status_code=413, detail="Spreadsheet row exceeds the Gemini input limit")
+        if batch and batch_chars + len(row_json) + 1 > max_batch_chars:
+            batches.append(batch)
+            batch = []
+            batch_chars = 2
+        batch.append(row)
+        batch_chars += len(row_json) + 1
+    if batch:
+        batches.append(batch)
+
+    providers = []
+    for batch in batches:
+        response = client.models.generate_content(
+            model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+            contents=prompt + json.dumps(batch, default=str),
+            config={"response_mime_type": "application/json", "temperature": 0},
+        )
+        providers.extend(parse_gemini_spreadsheet_extraction(response.text, batch))
+    return providers
+
+
 def parse_gemini_extraction(interpretation):
     if isinstance(interpretation, dict):
         return interpretation
@@ -388,6 +410,38 @@ def parse_gemini_extraction(interpretation):
     if not isinstance(parsed, dict):
         raise HTTPException(status_code=502, detail="Gemini returned an unexpected response")
     return parsed
+
+
+def parse_gemini_spreadsheet_extraction(interpretation, source_rows):
+    try:
+        parsed = json.loads(interpretation) if isinstance(interpretation, str) else interpretation
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=502, detail="Gemini returned invalid spreadsheet output")
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("providers"), list):
+        raise HTTPException(status_code=502, detail="Gemini returned an unexpected spreadsheet output")
+
+    valid_row_numbers = {row["row_number"] for row in source_rows}
+    providers = []
+    for provider in parsed["providers"]:
+        if not isinstance(provider, dict):
+            raise HTTPException(status_code=502, detail="Gemini returned an invalid provider")
+        row_numbers = provider.get("source_row_numbers")
+        if not isinstance(row_numbers, list):
+            raise HTTPException(status_code=502, detail="Gemini omitted spreadsheet row provenance")
+        try:
+            row_numbers = sorted({int(row_number) for row_number in row_numbers})
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=502, detail="Gemini returned invalid spreadsheet row provenance")
+        if not row_numbers or not set(row_numbers).issubset(valid_row_numbers):
+            raise HTTPException(status_code=502, detail="Gemini returned unknown spreadsheet row provenance")
+        provider_profile = provider.get("provider") or {}
+        if not isinstance(provider_profile, dict) or not (
+            provider_profile.get("name") or provider_profile.get("npi")
+        ):
+            raise HTTPException(status_code=502, detail="Gemini returned an unidentified provider")
+        provider["source_row_numbers"] = row_numbers
+        providers.append(provider)
+    return providers
 
 
 def normalized_key(value):
@@ -633,7 +687,8 @@ def process_drive_changes(service, connection):
                 event_ref.set(
                     {
                         "status": "imported",
-                        "provider_row_count": result["provider_row_count"],
+                        "source_row_count": result["source_row_count"],
+                        "provider_count": result["provider_count"],
                     },
                     merge=True,
                 )
