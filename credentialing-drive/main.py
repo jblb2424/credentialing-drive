@@ -500,22 +500,25 @@ def sync_provider_to_bigquery(provider_id, provider):
 def provider_changes(existing, updated):
     changes = {}
     for field_name in ("document_type", "entity_name", "group_name"):
-        if existing.get(field_name) != updated.get(field_name):
-            changes[field_name] = {
-                "previous": existing.get(field_name),
-                "current": updated.get(field_name),
-            }
+        previous_value = existing.get(field_name)
+        current_value = updated.get(field_name)
+        if current_value is None or previous_value == current_value:
+            continue
+        changes[field_name] = {"current": current_value}
+        if previous_value is not None:
+            changes[field_name]["previous"] = previous_value
 
     existing_profile = existing.get("provider") or {}
     updated_profile = updated.get("provider") or {}
-    profile_changes = {
-        field_name: {
-            "previous": existing_profile.get(field_name),
-            "current": updated_profile.get(field_name),
-        }
-        for field_name in ("name", "npi", "credentials")
-        if existing_profile.get(field_name) != updated_profile.get(field_name)
-    }
+    profile_changes = {}
+    for field_name in ("name", "npi", "credentials"):
+        previous_value = existing_profile.get(field_name)
+        current_value = updated_profile.get(field_name)
+        if current_value is None or previous_value == current_value:
+            continue
+        profile_changes[field_name] = {"current": current_value}
+        if previous_value is not None:
+            profile_changes[field_name]["previous"] = previous_value
     if profile_changes:
         changes["provider"] = profile_changes
 
