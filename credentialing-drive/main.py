@@ -236,13 +236,9 @@ def split_list(value):
 
 def save_spreadsheet_providers(metadata, providers):
     for extracted_provider in providers:
-        source_row_numbers = extracted_provider.pop("source_row_numbers", [])
+        extracted_provider.pop("source_row_numbers", None)
         normalized_provider = normalize_provider_data(extracted_provider)
-        upsert_normalized_provider(
-            normalized_provider,
-            metadata,
-            spreadsheet_row_numbers=source_row_numbers,
-        )
+        upsert_normalized_provider(normalized_provider, metadata)
 
 
 def process_drive_spreadsheet_in_memory(service, file_id):
@@ -501,22 +497,52 @@ def sync_provider_to_bigquery(provider_id, provider):
         raise RuntimeError(f"BigQuery provider sync failed: {errors}")
 
 
-def record_provider_revision(provider_ref, metadata, spreadsheet_row_numbers=None):
+def provider_changes(existing, updated):
+    changes = {}
+    for field_name in ("document_type", "entity_name", "group_name"):
+        if existing.get(field_name) != updated.get(field_name):
+            changes[field_name] = {
+                "previous": existing.get(field_name),
+                "current": updated.get(field_name),
+            }
+
+    existing_profile = existing.get("provider") or {}
+    updated_profile = updated.get("provider") or {}
+    profile_changes = {
+        field_name: {
+            "previous": existing_profile.get(field_name),
+            "current": updated_profile.get(field_name),
+        }
+        for field_name in ("name", "npi", "credentials")
+        if existing_profile.get(field_name) != updated_profile.get(field_name)
+    }
+    if profile_changes:
+        changes["provider"] = profile_changes
+
+    for field_name in ("locations", "payers", "licenses", "expiration_dates"):
+        added_values = [
+            value for value in updated.get(field_name, []) if value not in existing.get(field_name, [])
+        ]
+        if added_values:
+            changes[field_name] = {"added": added_values}
+    return changes
+
+
+def record_provider_revision(provider_ref, metadata, changes):
     revision = {
         "drive_file_id": metadata["id"],
         "file_name": metadata.get("name"),
         "mime_type": metadata.get("mimeType"),
+        "changes": changes,
         "recorded_at": firestore.SERVER_TIMESTAMP,
     }
-    if spreadsheet_row_numbers is not None:
-        revision["spreadsheet_row_numbers"] = spreadsheet_row_numbers
     provider_ref.collection("revisions").document(f"drive-{metadata['id']}").set(
         revision,
         merge=True,
     )
 
 
-def upsert_normalized_provider(provider, metadata, spreadsheet_row_numbers=None):
+def upsert_normalized_provider(provider, metadata):
     database = os.environ.get("FIRESTORE_DATABASE", "healthcare-credentialing")
     client = firestore.Client(database=database)
     provider_id = resolve_provider_id(client, provider)
@@ -532,23 +558,23 @@ def upsert_normalized_provider(provider, metadata, spreadsheet_row_numbers=None)
         for key in ("name", "npi", "credentials")
     }
     canonical_provider = {
-            "document_type": provider.get("document_type") or existing.get("document_type"),
-            "entity_name": provider.get("entity_name") or existing.get("entity_name"),
-            "group_name": provider.get("group_name") or existing.get("group_name"),
-            "provider": merged_profile,
-            "locations": merge_unique(existing.get("locations"), provider.get("locations")),
-            "payers": merge_unique(existing.get("payers"), provider.get("payers")),
-            "licenses": merge_unique(existing.get("licenses"), provider.get("licenses")),
-            "expiration_dates": merge_unique(
-                existing.get("expiration_dates"), provider.get("expiration_dates")
-            ),
+        "document_type": provider.get("document_type") or existing.get("document_type"),
+        "entity_name": provider.get("entity_name") or existing.get("entity_name"),
+        "group_name": provider.get("group_name") or existing.get("group_name"),
+        "provider": merged_profile,
+        "locations": merge_unique(existing.get("locations"), provider.get("locations")),
+        "payers": merge_unique(existing.get("payers"), provider.get("payers")),
+        "licenses": merge_unique(existing.get("licenses"), provider.get("licenses")),
+        "expiration_dates": merge_unique(
+            existing.get("expiration_dates"), provider.get("expiration_dates")
+        ),
     }
+    changes = provider_changes(existing, canonical_provider)
+    if not changes:
+        return provider_id
+
     provider_ref.set(canonical_provider, merge=True)
-    record_provider_revision(
-        provider_ref,
-        metadata,
-        spreadsheet_row_numbers=spreadsheet_row_numbers,
-    )
+    record_provider_revision(provider_ref, metadata, changes)
     try:
         sync_provider_to_bigquery(provider_id, canonical_provider)
     except Exception:
