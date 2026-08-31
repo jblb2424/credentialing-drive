@@ -499,7 +499,7 @@ def sync_provider_to_bigquery(provider_id, provider):
 
 def provider_changes(existing, updated):
     changes = {}
-    for field_name in ("document_type", "entity_name", "group_name"):
+    for field_name in ("entity_name", "group_name"):
         previous_value = existing.get(field_name)
         current_value = updated.get(field_name)
         if current_value is None or previous_value == current_value:
@@ -535,7 +535,6 @@ def record_provider_revision(provider_ref, metadata, changes):
     revision = {
         "drive_file_id": metadata["id"],
         "file_name": metadata.get("name"),
-        "mime_type": metadata.get("mimeType"),
         "changes": changes,
         "recorded_at": firestore.SERVER_TIMESTAMP,
     }
