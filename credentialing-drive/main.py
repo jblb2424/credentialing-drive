@@ -45,6 +45,27 @@ SPREADSHEET_MIME_TYPES = {CSV_MIME_TYPE, XLSX_MIME_TYPE, GOOGLE_SHEETS_MIME_TYPE
 MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
 MAX_SPREADSHEET_BYTES = 10 * 1024 * 1024
 MAX_GEMINI_INPUT_CHARS = 100_000
+DOCUMENT_CATEGORIES = (
+    "state_license",
+    "board_certificate_or_eligibility_letter",
+    "education_training_certificates",
+    "dea_registration",
+    "ecfmg_certificate",
+    "controlled_substance_certificate",
+    "cv_or_resume",
+    "malpractice_certificate",
+    "malpractice_claim_information",
+    "hospital_privileges_letter",
+    "drivers_license",
+    "social_security_card",
+    "collaborating_or_supervising_physician_agreement",
+    "peer_references",
+    "w_9",
+    "irs_letter",
+    "articles_of_organization",
+    "bank_letter_or_voided_check",
+    "other",
+)
 
 def get_connection_ref():
     database = os.environ.get("FIRESTORE_DATABASE", "healthcare-credentialing")
@@ -235,24 +256,28 @@ def split_list(value):
     return [item.strip() for item in re.split(r"[;,|]", str(value)) if item.strip()]
 
 
-def save_spreadsheet_providers(metadata, providers):
+def save_spreadsheet_providers(metadata, providers, document_category):
     for extracted_provider in providers:
         extracted_provider.pop("source_row_numbers", None)
         normalized_provider = normalize_provider_data(extracted_provider)
-        upsert_normalized_provider(normalized_provider, metadata)
+        upsert_normalized_provider(normalized_provider, metadata, document_category)
 
 
 def process_drive_spreadsheet_in_memory(service, file_id):
     metadata, spreadsheet_bytes = download_drive_spreadsheet(service, file_id)
     try:
         rows = parse_spreadsheet(spreadsheet_bytes, metadata["mimeType"])
+        document_category = classify_document_category(
+            metadata, json.dumps(rows, default=str)
+        )
         providers = interpret_spreadsheet_with_gemini(rows)
-        save_spreadsheet_providers(metadata, providers)
+        save_spreadsheet_providers(metadata, providers, document_category)
     finally:
         # Raw spreadsheet bytes are never persisted.
         spreadsheet_bytes = b""
     return {
         "metadata": metadata,
+        "document_category": document_category,
         "source_row_count": len(rows),
         "provider_count": len(providers),
     }
@@ -298,6 +323,37 @@ OCR text:
         config={"response_mime_type": "application/json", "temperature": 0},
     )
     return response.text
+
+
+def classify_document_category(metadata, content):
+    """Classify each uploaded file once so all resulting revisions share its category."""
+    prompt = f"""Classify this healthcare credentialing upload into exactly one category.
+Return JSON only in this shape: {{"document_category": "..."}}.
+Use only one of these values:
+{", ".join(DOCUMENT_CATEGORIES)}.
+Choose other when the file does not clearly fit one category. Do not infer a category from
+missing information. The file name is {metadata.get("name")!r}.
+
+Document content:
+"""
+    try:
+        client = genai.Client(
+            vertexai=True,
+            project=get_project_id(),
+            location=os.environ.get("VERTEX_AI_LOCATION", "global"),
+        )
+        response = client.models.generate_content(
+            model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+            contents=prompt + content[:MAX_GEMINI_INPUT_CHARS],
+            config={"response_mime_type": "application/json", "temperature": 0},
+        )
+        category = parse_gemini_extraction(response.text).get("document_category")
+        return category if category in DOCUMENT_CATEGORIES else "other"
+    except Exception:
+        logger.exception(
+            "Document category classification failed for Drive file_id=%s", metadata.get("id")
+        )
+        return "other"
 
 
 def interpret_spreadsheet_with_gemini(rows):
@@ -532,10 +588,11 @@ def provider_changes(existing, updated):
     return changes
 
 
-def record_provider_revision(provider_ref, metadata, changes):
+def record_provider_revision(provider_ref, metadata, changes, document_category):
     revision = {
         "drive_file_id": metadata["id"],
         "file_name": metadata.get("name"),
+        "document_category": document_category,
         "changes": changes,
         "recorded_at": firestore.SERVER_TIMESTAMP,
     }
@@ -642,7 +699,7 @@ def record_discrepancies_and_provenance(provider_ref, metadata, changes):
         )
 
 
-def upsert_normalized_provider(provider, metadata):
+def upsert_normalized_provider(provider, metadata, document_category="other"):
     database = os.environ.get("FIRESTORE_DATABASE", "healthcare-credentialing")
     client = firestore.Client(database=database)
     provider_id = resolve_provider_id(client, provider)
@@ -674,7 +731,7 @@ def upsert_normalized_provider(provider, metadata):
         return provider_id
 
     provider_ref.set(canonical_provider, merge=True)
-    record_provider_revision(provider_ref, metadata, changes)
+    record_provider_revision(provider_ref, metadata, changes, document_category)
     record_discrepancies_and_provenance(provider_ref, metadata, changes)
     try:
         sync_provider_to_bigquery(provider_id, canonical_provider)
@@ -684,24 +741,26 @@ def upsert_normalized_provider(provider, metadata):
     return provider_id
 
 
-def save_pdf_provider(metadata, extraction):
+def save_pdf_provider(metadata, extraction, document_category):
     provider = normalize_provider_data(extraction)
-    return upsert_normalized_provider(provider, metadata)
+    return upsert_normalized_provider(provider, metadata, document_category)
 
 
 def process_drive_pdf_in_memory(service, file_id):
     metadata, pdf_bytes = download_drive_pdf(service, file_id)
     try:
         extracted_text, page_count = extract_text_with_document_ai(pdf_bytes)
+        document_category = classify_document_category(metadata, extracted_text)
         interpretation = interpret_text_with_gemini(extracted_text)
     finally:
         # Release the raw source document immediately after managed processing.
         pdf_bytes = b""
 
     extraction = parse_gemini_extraction(interpretation)
-    save_pdf_provider(metadata, extraction)
+    save_pdf_provider(metadata, extraction, document_category)
     return {
         "metadata": metadata,
+        "document_category": document_category,
         "page_count": page_count,
         "extracted_text": extracted_text,
         "gemini_interpretation": extraction,
