@@ -7,7 +7,10 @@ import hashlib
 import re
 import secrets
 import uuid
+import zipfile
 from datetime import date, datetime, timezone
+from html import unescape
+from xml.etree import ElementTree
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
@@ -40,11 +43,28 @@ BIGQUERY_REPORTING_TABLE = "provider_reporting_events"
 PDF_MIME_TYPE = "application/pdf"
 JPEG_MIME_TYPE = "image/jpeg"
 PNG_MIME_TYPE = "image/png"
+GIF_MIME_TYPE = "image/gif"
+TIFF_MIME_TYPE = "image/tiff"
+BMP_MIME_TYPE = "image/bmp"
+WEBP_MIME_TYPE = "image/webp"
+DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+GOOGLE_DOCUMENT_MIME_TYPE = "application/vnd.google-apps.document"
+TEXT_MIME_TYPES = {"text/plain", "text/rtf", "text/html", "text/markdown"}
 CSV_MIME_TYPE = "text/csv"
 XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 GOOGLE_SHEETS_MIME_TYPE = "application/vnd.google-apps.spreadsheet"
 SPREADSHEET_MIME_TYPES = {CSV_MIME_TYPE, XLSX_MIME_TYPE, GOOGLE_SHEETS_MIME_TYPE}
-DOCUMENT_MIME_TYPES = {PDF_MIME_TYPE, JPEG_MIME_TYPE, PNG_MIME_TYPE}
+OCR_DOCUMENT_MIME_TYPES = {
+    PDF_MIME_TYPE,
+    JPEG_MIME_TYPE,
+    PNG_MIME_TYPE,
+    GIF_MIME_TYPE,
+    TIFF_MIME_TYPE,
+    BMP_MIME_TYPE,
+    WEBP_MIME_TYPE,
+}
+TEXT_DOCUMENT_MIME_TYPES = TEXT_MIME_TYPES | {DOCX_MIME_TYPE, GOOGLE_DOCUMENT_MIME_TYPE}
+DOCUMENT_MIME_TYPES = OCR_DOCUMENT_MIME_TYPES | TEXT_DOCUMENT_MIME_TYPES
 MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
 MAX_SPREADSHEET_BYTES = 10 * 1024 * 1024
 MAX_GEMINI_INPUT_CHARS = 100_000
@@ -162,8 +182,13 @@ def download_drive_document(service, file_id):
     if file_size > MAX_DOCUMENT_BYTES:
         raise HTTPException(status_code=413, detail="Document exceeds the 20 MB processing limit")
 
+    if metadata["mimeType"] == GOOGLE_DOCUMENT_MIME_TYPE:
+        request = service.files().export_media(fileId=file_id, mimeType="text/plain")
+    else:
+        request = service.files().get_media(fileId=file_id)
+
     buffer = io.BytesIO()
-    downloader = MediaIoBaseDownload(buffer, service.files().get_media(fileId=file_id))
+    downloader = MediaIoBaseDownload(buffer, request)
     done = False
     while not done:
         _, done = downloader.next_chunk()
@@ -302,6 +327,47 @@ def extract_text_with_document_ai(document_bytes, mime_type):
     )
     document = client.process_document(request=request).document
     return document.text, len(document.pages)
+
+
+def extract_text_from_docx(document_bytes):
+    try:
+        with zipfile.ZipFile(io.BytesIO(document_bytes)) as archive:
+            document_xml = archive.read("word/document.xml")
+    except (KeyError, zipfile.BadZipFile, ElementTree.ParseError):
+        raise HTTPException(status_code=422, detail="Invalid DOCX document")
+
+    root = ElementTree.fromstring(document_xml)
+    paragraphs = []
+    for paragraph in root.findall(".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"):
+        text = "".join(
+            node.text or ""
+            for node in paragraph.findall(
+                ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t"
+            )
+        ).strip()
+        if text:
+            paragraphs.append(text)
+    return "\n".join(paragraphs)
+
+
+def extract_text_from_text_document(document_bytes, mime_type):
+    if mime_type == DOCX_MIME_TYPE:
+        return extract_text_from_docx(document_bytes)
+
+    text = document_bytes.decode("utf-8", errors="replace")
+    if mime_type == "text/html":
+        text = unescape(re.sub(r"<[^>]+>", " ", text))
+    elif mime_type == "text/rtf":
+        text = text.replace("\\par", "\n")
+        text = re.sub(r"\\[a-zA-Z]+-?\d* ?", " ", text)
+        text = text.replace("{", " ").replace("}", " ")
+    return re.sub(r"[ \t]+", " ", text).strip()
+
+
+def extract_document_text(document_bytes, mime_type):
+    if mime_type in OCR_DOCUMENT_MIME_TYPES:
+        return extract_text_with_document_ai(document_bytes, mime_type)
+    return extract_text_from_text_document(document_bytes, mime_type), 1
 
 
 def interpret_text_with_gemini(ocr_text):
@@ -468,7 +534,6 @@ def normalize_provider_data(extraction):
     name = provider.get("name") or extraction.get("provider_name")
     npi = provider.get("npi") or extraction.get("npi")
     return {
-        "document_type": extraction.get("document_type") or "unknown",
         "entity_name": extraction.get("entity_name"),
         "group_name": extraction.get("group_name"),
         "provider": {
@@ -507,7 +572,9 @@ def resolve_provider_id(client, provider):
                 )
             return provider_id
 
-    provider_id = identity_keys[0]
+    # Names and NPIs are aliases used to match later imports. The provider itself
+    # receives an opaque Firestore-generated ID.
+    provider_id = client.collection(PROVIDER_COLLECTION).document().id
     for identity_key in identity_keys:
         client.collection(PROVIDER_IDENTITY_COLLECTION).document(identity_key).set(
             {"provider_id": provider_id}, merge=True
@@ -538,7 +605,6 @@ def sync_provider_to_bigquery(provider_id, provider):
     profile = provider["provider"]
     row = {
         "provider_id": provider_id,
-        "document_type": provider.get("document_type"),
         "entity_name": provider.get("entity_name"),
         "group_name": provider.get("group_name"),
         "provider_name": profile.get("name"),
@@ -718,7 +784,8 @@ def upsert_normalized_provider(provider, metadata, document_category="other"):
         for key in ("name", "npi", "credentials")
     }
     canonical_provider = {
-        "document_type": provider.get("document_type") or existing.get("document_type"),
+        # Remove the legacy single-document classification from the provider record.
+        "document_type": firestore.DELETE_FIELD,
         "entity_name": provider.get("entity_name") or existing.get("entity_name"),
         "group_name": provider.get("group_name") or existing.get("group_name"),
         "provider": merged_profile,
@@ -752,7 +819,7 @@ def save_document_provider(metadata, extraction, document_category):
 def process_drive_document_in_memory(service, file_id):
     metadata, document_bytes = download_drive_document(service, file_id)
     try:
-        extracted_text, page_count = extract_text_with_document_ai(
+        extracted_text, page_count = extract_document_text(
             document_bytes, metadata["mimeType"]
         )
         document_category = classify_document_category(metadata, extracted_text)
