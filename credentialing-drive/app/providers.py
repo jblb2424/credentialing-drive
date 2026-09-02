@@ -6,6 +6,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 
+from fastapi import HTTPException
 from google.cloud import bigquery, firestore
 
 from app.config import (
@@ -16,6 +17,29 @@ from app.connections import get_project_id
 
 logger = logging.getLogger(__name__)
 
+
+
+def get_firestore_client():
+    database = os.environ.get("FIRESTORE_DATABASE", "healthcare-credentialing")
+    return firestore.Client(database=database)
+
+
+def serialize_provider(snapshot):
+    return {"id": snapshot.id, **(snapshot.to_dict() or {})}
+
+
+def list_providers(limit):
+    snapshots = get_firestore_client().collection(PROVIDER_COLLECTION).limit(limit).stream()
+    return [serialize_provider(snapshot) for snapshot in snapshots]
+
+
+def get_provider(provider_id):
+    snapshot = (
+        get_firestore_client().collection(PROVIDER_COLLECTION).document(provider_id).get()
+    )
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    return serialize_provider(snapshot)
 
 
 def normalized_key(value):

@@ -3,7 +3,7 @@ import secrets
 import uuid
 import logging
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from google.cloud import firestore
 
@@ -12,6 +12,7 @@ from app.connections import (
     get_webhook_url, update_connection,
 )
 from app.processing import process_drive_changes, process_drive_document_in_memory
+from app.providers import get_provider, list_providers
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -21,6 +22,16 @@ logger = logging.getLogger(__name__)
 def home():
     return {"status": "ok", "service": "credentialing-drive-test"}
 
+
+
+@router.get("/providers")
+def get_providers(limit: int = Query(default=100, ge=1, le=500)):
+    return {"providers": list_providers(limit)}
+
+
+@router.get("/providers/{provider_id}")
+def get_provider_by_id(provider_id: str):
+    return get_provider(provider_id)
 
 
 @router.get("/oauth/google/start")
