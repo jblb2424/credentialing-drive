@@ -38,10 +38,13 @@ PROVIDER_IDENTITY_COLLECTION = "provider_identities"
 BIGQUERY_REPORTING_DATASET = "credentialing_reporting"
 BIGQUERY_REPORTING_TABLE = "provider_reporting_events"
 PDF_MIME_TYPE = "application/pdf"
+JPEG_MIME_TYPE = "image/jpeg"
+PNG_MIME_TYPE = "image/png"
 CSV_MIME_TYPE = "text/csv"
 XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 GOOGLE_SHEETS_MIME_TYPE = "application/vnd.google-apps.spreadsheet"
 SPREADSHEET_MIME_TYPES = {CSV_MIME_TYPE, XLSX_MIME_TYPE, GOOGLE_SHEETS_MIME_TYPE}
+DOCUMENT_MIME_TYPES = {PDF_MIME_TYPE, JPEG_MIME_TYPE, PNG_MIME_TYPE}
 MAX_DOCUMENT_BYTES = 20 * 1024 * 1024
 MAX_SPREADSHEET_BYTES = 10 * 1024 * 1024
 MAX_GEMINI_INPUT_CHARS = 100_000
@@ -144,7 +147,7 @@ def get_project_id():
     return project_id
 
 
-def download_drive_pdf(service, file_id):
+def download_drive_document(service, file_id):
     metadata = (
         service.files()
         .get(fileId=file_id, fields="id,name,mimeType,size,trashed")
@@ -152,12 +155,12 @@ def download_drive_pdf(service, file_id):
     )
     if metadata.get("trashed"):
         raise HTTPException(status_code=404, detail="Drive file is trashed")
-    if metadata.get("mimeType") != PDF_MIME_TYPE:
-        raise HTTPException(status_code=415, detail="Only PDF files are supported")
+    if metadata.get("mimeType") not in DOCUMENT_MIME_TYPES:
+        raise HTTPException(status_code=415, detail="Unsupported document format")
 
     file_size = int(metadata.get("size", 0))
     if file_size > MAX_DOCUMENT_BYTES:
-        raise HTTPException(status_code=413, detail="PDF exceeds the 20 MB processing limit")
+        raise HTTPException(status_code=413, detail="Document exceeds the 20 MB processing limit")
 
     buffer = io.BytesIO()
     downloader = MediaIoBaseDownload(buffer, service.files().get_media(fileId=file_id))
@@ -165,10 +168,10 @@ def download_drive_pdf(service, file_id):
     while not done:
         _, done = downloader.next_chunk()
 
-    pdf_bytes = buffer.getvalue()
-    if len(pdf_bytes) > MAX_DOCUMENT_BYTES:
-        raise HTTPException(status_code=413, detail="PDF exceeds the 20 MB processing limit")
-    return metadata, pdf_bytes
+    document_bytes = buffer.getvalue()
+    if len(document_bytes) > MAX_DOCUMENT_BYTES:
+        raise HTTPException(status_code=413, detail="Document exceeds the 20 MB processing limit")
+    return metadata, document_bytes
 
 
 def download_drive_spreadsheet(service, file_id):
@@ -283,7 +286,7 @@ def process_drive_spreadsheet_in_memory(service, file_id):
     }
 
 
-def extract_text_with_document_ai(pdf_bytes):
+def extract_text_with_document_ai(document_bytes, mime_type):
     project_id = get_project_id()
     location = os.environ.get("DOCUMENT_AI_LOCATION", "us")
     processor_id = os.environ.get("DOCUMENT_AI_PROCESSOR_ID")
@@ -295,7 +298,7 @@ def extract_text_with_document_ai(pdf_bytes):
     )
     request = documentai.ProcessRequest(
         name=client.processor_path(project_id, location, processor_id),
-        raw_document=documentai.RawDocument(content=pdf_bytes, mime_type=PDF_MIME_TYPE),
+        raw_document=documentai.RawDocument(content=document_bytes, mime_type=mime_type),
     )
     document = client.process_document(request=request).document
     return document.text, len(document.pages)
@@ -741,23 +744,25 @@ def upsert_normalized_provider(provider, metadata, document_category="other"):
     return provider_id
 
 
-def save_pdf_provider(metadata, extraction, document_category):
+def save_document_provider(metadata, extraction, document_category):
     provider = normalize_provider_data(extraction)
     return upsert_normalized_provider(provider, metadata, document_category)
 
 
-def process_drive_pdf_in_memory(service, file_id):
-    metadata, pdf_bytes = download_drive_pdf(service, file_id)
+def process_drive_document_in_memory(service, file_id):
+    metadata, document_bytes = download_drive_document(service, file_id)
     try:
-        extracted_text, page_count = extract_text_with_document_ai(pdf_bytes)
+        extracted_text, page_count = extract_text_with_document_ai(
+            document_bytes, metadata["mimeType"]
+        )
         document_category = classify_document_category(metadata, extracted_text)
         interpretation = interpret_text_with_gemini(extracted_text)
     finally:
         # Release the raw source document immediately after managed processing.
-        pdf_bytes = b""
+        document_bytes = b""
 
     extraction = parse_gemini_extraction(interpretation)
-    save_pdf_provider(metadata, extraction, document_category)
+    save_document_provider(metadata, extraction, document_category)
     return {
         "metadata": metadata,
         "document_category": document_category,
@@ -834,16 +839,16 @@ def process_drive_changes(service, connection):
                 detected_changes.append({**event, "status": "imported"})
                 continue
 
-            if event["mime_type"] != PDF_MIME_TYPE:
+            if event["mime_type"] not in DOCUMENT_MIME_TYPES:
                 event_ref.set({"status": "skipped"}, merge=True)
                 detected_changes.append({**event, "status": "skipped"})
                 continue
 
             try:
-                result = process_drive_pdf_in_memory(service, file_id)
+                result = process_drive_document_in_memory(service, file_id)
             except Exception:
                 # Preserve no document contents or model output in logs or Firestore.
-                logger.exception("Automatic PDF processing failed for Drive file_id=%s", file_id)
+                logger.exception("Automatic document processing failed for Drive file_id=%s", file_id)
                 event_ref.set({"status": "failed"}, merge=True)
                 detected_changes.append({**event, "status": "failed"})
                 continue
@@ -860,7 +865,7 @@ def process_drive_changes(service, connection):
                 merge=True,
             )
             logger.info(
-                "Automatically processed Drive PDF file_id=%s pages=%s extracted_characters=%s",
+                "Automatically processed Drive document file_id=%s pages=%s extracted_characters=%s",
                 file_id,
                 result["page_count"],
                 len(result["extracted_text"]),
@@ -946,12 +951,12 @@ def find_test_folder():
 
 @app.post("/drive/process/{file_id}")
 def process_drive_pdf(file_id: str):
-    """Download a Drive PDF, OCR and interpret it, then release its in-memory bytes."""
-    result = process_drive_pdf_in_memory(get_drive_service(), file_id)
+    """Download a Drive document, OCR and interpret it, then release its in-memory bytes."""
+    result = process_drive_document_in_memory(get_drive_service(), file_id)
     metadata = result["metadata"]
 
     logger.info(
-        "Processed Drive PDF file_id=%s name=%s pages=%s extracted_characters=%s",
+        "Processed Drive document file_id=%s name=%s pages=%s extracted_characters=%s",
         metadata["id"],
         metadata.get("name"),
         result["page_count"],
