@@ -14,6 +14,7 @@ from app.config import (
     PROVIDER_IDENTITY_COLLECTION,
 )
 from app.connections import get_project_id
+from app.issues import calculate_provider_issues
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,9 @@ def get_firestore_client():
 
 
 def serialize_provider(snapshot):
-    return {"id": snapshot.id, **(snapshot.to_dict() or {})}
+    provider = snapshot.to_dict() or {}
+    issues = calculate_provider_issues(snapshot.reference, provider)
+    return {"id": snapshot.id, **provider, "issues": issues, "issue_count": len(issues)}
 
 
 def list_providers(limit):
