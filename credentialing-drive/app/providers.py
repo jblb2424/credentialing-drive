@@ -13,16 +13,11 @@ from app.config import (
     BIGQUERY_REPORTING_DATASET, BIGQUERY_REPORTING_TABLE, PROVIDER_COLLECTION,
     PROVIDER_IDENTITY_COLLECTION,
 )
-from app.connections import get_project_id
+from app.connections import get_firestore_client, get_project_id
 from app.issues import calculate_provider_issues
 
 logger = logging.getLogger(__name__)
 
-
-
-def get_firestore_client():
-    database = os.environ.get("FIRESTORE_DATABASE", "healthcare-credentialing")
-    return firestore.Client(database=database)
 
 
 def serialize_provider(snapshot):
@@ -292,8 +287,7 @@ def record_discrepancies_and_provenance(provider_ref, metadata, changes):
 
 
 def upsert_normalized_provider(provider, metadata, document_category="other"):
-    database = os.environ.get("FIRESTORE_DATABASE", "healthcare-credentialing")
-    client = firestore.Client(database=database)
+    client = get_firestore_client()
     provider_id = resolve_provider_id(client, provider)
     if not provider_id:
         return None

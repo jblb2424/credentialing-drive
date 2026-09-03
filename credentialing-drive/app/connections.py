@@ -10,10 +10,13 @@ from app.config import CONNECTION_COLLECTION, CONNECTION_ID, SCOPES
 
 
 
-def get_connection_ref():
+def get_firestore_client():
     database = os.environ.get("FIRESTORE_DATABASE", "healthcare-credentialing")
-    client = firestore.Client(database=database)
-    return client.collection(CONNECTION_COLLECTION).document(CONNECTION_ID)
+    return firestore.Client(database=database)
+
+
+def get_connection_ref():
+    return get_firestore_client().collection(CONNECTION_COLLECTION).document(CONNECTION_ID)
 
 
 def get_connection():

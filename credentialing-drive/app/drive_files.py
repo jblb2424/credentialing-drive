@@ -14,70 +14,86 @@ from app.config import (
 
 
 
-def download_drive_document(service, file_id):
-    metadata = (
-        service.files()
-        .get(fileId=file_id, fields="id,name,mimeType,size,trashed")
-        .execute()
-    )
-    if metadata.get("trashed"):
-        raise HTTPException(status_code=404, detail="Drive file is trashed")
-    if metadata.get("mimeType") not in DOCUMENT_MIME_TYPES:
-        raise HTTPException(status_code=415, detail="Unsupported document format")
+DRIVE_FILE_FIELDS = "id,name,mimeType,size,trashed"
 
-    file_size = int(metadata.get("size", 0))
-    if file_size > MAX_DOCUMENT_BYTES:
-        raise HTTPException(status_code=413, detail="Document exceeds the 20 MB processing limit")
 
-    if metadata["mimeType"] == GOOGLE_DOCUMENT_MIME_TYPE:
-        request = service.files().export_media(fileId=file_id, mimeType="text/plain")
+def get_drive_file_metadata(service, file_id):
+    return service.files().get(fileId=file_id, fields=DRIVE_FILE_FIELDS).execute()
+
+
+def download_drive_bytes(service, metadata, export_mime_type=None):
+    if export_mime_type:
+        request = service.files().export_media(
+            fileId=metadata["id"], mimeType=export_mime_type
+        )
     else:
-        request = service.files().get_media(fileId=file_id)
+        request = service.files().get_media(fileId=metadata["id"])
 
     buffer = io.BytesIO()
     downloader = MediaIoBaseDownload(buffer, request)
     done = False
     while not done:
         _, done = downloader.next_chunk()
+    return buffer.getvalue()
 
-    document_bytes = buffer.getvalue()
-    if len(document_bytes) > MAX_DOCUMENT_BYTES:
-        raise HTTPException(status_code=413, detail="Document exceeds the 20 MB processing limit")
-    return metadata, document_bytes
+
+def download_drive_file(
+    service,
+    file_id,
+    allowed_mime_types,
+    max_bytes,
+    file_kind,
+    export_mime_type=None,
+    metadata=None,
+):
+    metadata = metadata or get_drive_file_metadata(service, file_id)
+    if metadata.get("trashed"):
+        raise HTTPException(status_code=404, detail="Drive file is trashed")
+    if metadata.get("mimeType") not in allowed_mime_types:
+        raise HTTPException(status_code=415, detail=f"Unsupported {file_kind} format")
+
+    max_megabytes = max_bytes // (1024 * 1024)
+    if int(metadata.get("size", 0)) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"{file_kind.capitalize()} exceeds the {max_megabytes} MB processing limit",
+        )
+
+    file_bytes = download_drive_bytes(service, metadata, export_mime_type)
+    if len(file_bytes) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"{file_kind.capitalize()} exceeds the {max_megabytes} MB processing limit",
+        )
+    return metadata, file_bytes
+
+
+def download_drive_document(service, file_id):
+    metadata = get_drive_file_metadata(service, file_id)
+    export_mime_type = "text/plain" if metadata.get("mimeType") == GOOGLE_DOCUMENT_MIME_TYPE else None
+    return download_drive_file(
+        service,
+        file_id,
+        DOCUMENT_MIME_TYPES,
+        MAX_DOCUMENT_BYTES,
+        "document",
+        export_mime_type,
+        metadata,
+    )
 
 
 def download_drive_spreadsheet(service, file_id):
-    metadata = (
-        service.files()
-        .get(fileId=file_id, fields="id,name,mimeType,size,trashed")
-        .execute()
+    metadata = get_drive_file_metadata(service, file_id)
+    export_mime_type = CSV_MIME_TYPE if metadata.get("mimeType") == GOOGLE_SHEETS_MIME_TYPE else None
+    return download_drive_file(
+        service,
+        file_id,
+        SPREADSHEET_MIME_TYPES,
+        MAX_SPREADSHEET_BYTES,
+        "spreadsheet",
+        export_mime_type,
+        metadata,
     )
-    if metadata.get("trashed"):
-        raise HTTPException(status_code=404, detail="Drive file is trashed")
-    if metadata.get("mimeType") not in SPREADSHEET_MIME_TYPES:
-        raise HTTPException(status_code=415, detail="Unsupported spreadsheet format")
-    if int(metadata.get("size", 0)) > MAX_SPREADSHEET_BYTES:
-        raise HTTPException(
-            status_code=413, detail="Spreadsheet exceeds the 10 MB processing limit"
-        )
-
-    if metadata["mimeType"] == GOOGLE_SHEETS_MIME_TYPE:
-        request = service.files().export_media(fileId=file_id, mimeType=CSV_MIME_TYPE)
-    else:
-        request = service.files().get_media(fileId=file_id)
-
-    buffer = io.BytesIO()
-    downloader = MediaIoBaseDownload(buffer, request)
-    done = False
-    while not done:
-        _, done = downloader.next_chunk()
-
-    spreadsheet_bytes = buffer.getvalue()
-    if len(spreadsheet_bytes) > MAX_SPREADSHEET_BYTES:
-        raise HTTPException(
-            status_code=413, detail="Spreadsheet exceeds the 10 MB processing limit"
-        )
-    return metadata, spreadsheet_bytes
 
 
 def normalize_cell(value):

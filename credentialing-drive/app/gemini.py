@@ -12,6 +12,20 @@ logger = logging.getLogger(__name__)
 
 
 
+def generate_gemini_json(contents):
+    client = genai.Client(
+        vertexai=True,
+        project=get_project_id(),
+        location=os.environ.get("VERTEX_AI_LOCATION", "global"),
+    )
+    response = client.models.generate_content(
+        model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+        contents=contents,
+        config={"response_mime_type": "application/json", "temperature": 0},
+    )
+    return response.text
+
+
 def interpret_text_with_gemini(ocr_text):
     if not ocr_text:
         return {"document_type": "unknown", "summary": "No text extracted"}
@@ -23,17 +37,7 @@ Use null or empty arrays when a value is not present. Do not infer values that a
 
 OCR text:
 """
-    client = genai.Client(
-        vertexai=True,
-        project=get_project_id(),
-        location=os.environ.get("VERTEX_AI_LOCATION", "global"),
-    )
-    response = client.models.generate_content(
-        model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
-        contents=prompt + ocr_text[:MAX_GEMINI_INPUT_CHARS],
-        config={"response_mime_type": "application/json", "temperature": 0},
-    )
-    return response.text
+    return generate_gemini_json(prompt + ocr_text[:MAX_GEMINI_INPUT_CHARS])
 
 
 def classify_document_category(metadata, content):
@@ -48,17 +52,9 @@ missing information. The file name is {metadata.get("name")!r}.
 Document content:
 """
     try:
-        client = genai.Client(
-            vertexai=True,
-            project=get_project_id(),
-            location=os.environ.get("VERTEX_AI_LOCATION", "global"),
-        )
-        response = client.models.generate_content(
-            model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
-            contents=prompt + content[:MAX_GEMINI_INPUT_CHARS],
-            config={"response_mime_type": "application/json", "temperature": 0},
-        )
-        category = parse_gemini_extraction(response.text).get("document_category")
+        category = parse_gemini_extraction(
+            generate_gemini_json(prompt + content[:MAX_GEMINI_INPUT_CHARS])
+        ).get("document_category")
         return category if category in DOCUMENT_CATEGORIES else "other"
     except Exception:
         logger.exception(
@@ -87,11 +83,6 @@ values. Preserve all meaningful payer, location, license, and expiration informa
 
 Spreadsheet rows (each object contains an original row_number and raw, client-supplied columns):
 """
-    client = genai.Client(
-        vertexai=True,
-        project=get_project_id(),
-        location=os.environ.get("VERTEX_AI_LOCATION", "global"),
-    )
     max_batch_chars = MAX_GEMINI_INPUT_CHARS - len(prompt)
     batches = []
     batch = []
@@ -111,12 +102,8 @@ Spreadsheet rows (each object contains an original row_number and raw, client-su
 
     providers = []
     for batch in batches:
-        response = client.models.generate_content(
-            model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
-            contents=prompt + json.dumps(batch, default=str),
-            config={"response_mime_type": "application/json", "temperature": 0},
-        )
-        providers.extend(parse_gemini_spreadsheet_extraction(response.text, batch))
+        interpretation = generate_gemini_json(prompt + json.dumps(batch, default=str))
+        providers.extend(parse_gemini_spreadsheet_extraction(interpretation, batch))
     return providers
 
 

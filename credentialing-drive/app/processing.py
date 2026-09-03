@@ -1,13 +1,11 @@
 import json
 import logging
-import os
 
 from fastapi import HTTPException
 from google.api_core.exceptions import AlreadyExists
-from google.cloud import firestore
 
 from app.config import DOCUMENT_MIME_TYPES, EVENT_COLLECTION, SPREADSHEET_MIME_TYPES
-from app.connections import get_drive_service, update_connection
+from app.connections import get_firestore_client, update_connection
 from app.drive_files import download_drive_document, download_drive_spreadsheet, parse_spreadsheet
 from app.extraction import extract_document_text
 from app.gemini import (
@@ -81,8 +79,7 @@ def process_drive_changes(service, connection):
     if not page_token or not folder_id:
         raise HTTPException(status_code=409, detail="Drive watch is not configured")
 
-    database = os.environ.get("FIRESTORE_DATABASE", "healthcare-credentialing")
-    client = firestore.Client(database=database)
+    client = get_firestore_client()
     detected_changes = []
 
     while page_token:

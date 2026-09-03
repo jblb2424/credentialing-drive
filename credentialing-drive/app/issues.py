@@ -38,6 +38,16 @@ def revision_field_changes(value, prefix=""):
         yield from revision_field_changes(nested_value, field_path)
 
 
+def build_issue(issue_id, issue_type, severity, affected_fields, **details):
+    return {
+        "id": issue_id,
+        "type": issue_type,
+        "severity": severity,
+        "affected_fields": affected_fields,
+        **details,
+    }
+
+
 def discrepancy_issues(provider_ref):
     issues = []
     for revision_snapshot in provider_ref.collection("revisions").stream():
@@ -47,17 +57,17 @@ def discrepancy_issues(provider_ref):
                 continue
             severity = "critical" if field_path == "provider.npi" else "high"
             issues.append(
-                {
-                    "id": f"discrepancy-{revision_snapshot.id}-{field_path}",
-                    "type": "discrepancy",
-                    "severity": severity,
-                    "affected_fields": [field_path],
-                    "previous_value": change["previous"],
-                    "current_value": change["current"],
-                    "revision_id": revision_snapshot.id,
-                    "file_name": revision.get("file_name"),
-                    "drive_file_id": revision.get("drive_file_id"),
-                }
+                build_issue(
+                    f"discrepancy-{revision_snapshot.id}-{field_path}",
+                    "discrepancy",
+                    severity,
+                    [field_path],
+                    previous_value=change["previous"],
+                    current_value=change["current"],
+                    revision_id=revision_snapshot.id,
+                    file_name=revision.get("file_name"),
+                    drive_file_id=revision.get("drive_file_id"),
+                )
             )
     return issues
 
@@ -72,25 +82,25 @@ def expiration_issues(provider):
         days_until_expiration = (expiration_date - today).days
         if days_until_expiration < 0:
             issues.append(
-                {
-                    "id": f"expired-{expiration_date.isoformat()}",
-                    "type": "expired",
-                    "severity": "high",
-                    "affected_fields": ["expiration_dates"],
-                    "expiration_date": expiration_date.isoformat(),
-                    "days_past_expiration": abs(days_until_expiration),
-                }
+                build_issue(
+                    f"expired-{expiration_date.isoformat()}",
+                    "expired",
+                    "high",
+                    ["expiration_dates"],
+                    expiration_date=expiration_date.isoformat(),
+                    days_past_expiration=abs(days_until_expiration),
+                )
             )
         elif days_until_expiration <= EXPIRING_WINDOW_DAYS:
             issues.append(
-                {
-                    "id": f"expiring-{expiration_date.isoformat()}",
-                    "type": "expiring",
-                    "severity": "medium",
-                    "affected_fields": ["expiration_dates"],
-                    "expiration_date": expiration_date.isoformat(),
-                    "days_until_expiration": days_until_expiration,
-                }
+                build_issue(
+                    f"expiring-{expiration_date.isoformat()}",
+                    "expiring",
+                    "medium",
+                    ["expiration_dates"],
+                    expiration_date=expiration_date.isoformat(),
+                    days_until_expiration=days_until_expiration,
+                )
             )
     return issues
 
@@ -105,12 +115,9 @@ def missing_data_issues(provider):
     if not missing_fields:
         return []
     return [
-        {
-            "id": "missing-critical-provider-data",
-            "type": "missing_data",
-            "severity": "high",
-            "affected_fields": missing_fields,
-        }
+        build_issue(
+            "missing-critical-provider-data", "missing_data", "high", missing_fields
+        )
     ]
 
 
