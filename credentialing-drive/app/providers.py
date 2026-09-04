@@ -200,12 +200,6 @@ def scalar_field_changes(changes):
             yield f"provider.{field_name}", change
 
 
-def scalar_revision_changes(changes):
-    for field_path, change in scalar_field_changes(changes):
-        if "previous" in change:
-            yield field_path, change
-
-
 def source_metadata(metadata):
     return {
         "file_name": metadata.get("name"),
@@ -217,61 +211,8 @@ def field_provenance_id(field_path):
     return hashlib.sha256(field_path.encode("utf-8")).hexdigest()
 
 
-def revision_change_for_field(revision, field_path):
-    if field_path.startswith("provider."):
-        return (revision.get("changes", {}).get("provider", {}) or {}).get(
-            field_path.removeprefix("provider.")
-        )
-    return (revision.get("changes") or {}).get(field_path)
-
-
-def previous_field_source(provider_ref, field_path, previous_value):
-    provenance_ref = provider_ref.collection("field_provenance").document(
-        field_provenance_id(field_path)
-    )
-    provenance = provenance_ref.get().to_dict() or {}
-    if provenance.get("value") == previous_value and provenance.get("source"):
-        return provenance["source"]
-
-    for revision_snapshot in provider_ref.collection("revisions").stream():
-        revision = revision_snapshot.to_dict() or {}
-        change = revision_change_for_field(revision, field_path) or {}
-        if change.get("current") == previous_value:
-            return {
-                "file_name": revision.get("file_name"),
-                "drive_file_id": revision.get("drive_file_id"),
-            }
-    return {"source_status": "unavailable"}
-
-
-def issue_id(field_path, previous_value, current_value):
-    values = json.dumps(
-        [field_path, previous_value, current_value], sort_keys=True, default=str
-    )
-    return hashlib.sha256(values.encode("utf-8")).hexdigest()
-
-
-def record_discrepancies_and_provenance(provider_ref, metadata, changes):
+def record_field_provenance(provider_ref, metadata, changes):
     current_source = source_metadata(metadata)
-    for field_path, change in scalar_revision_changes(changes):
-        previous_value = change["previous"]
-        current_value = change["current"]
-        previous_source = previous_field_source(provider_ref, field_path, previous_value)
-        provider_ref.collection("issues").document(
-            issue_id(field_path, previous_value, current_value)
-        ).set(
-            {
-                "status": "open",
-                "field_path": field_path,
-                "previous_value": previous_value,
-                "previous_source": previous_source,
-                "current_value": current_value,
-                "current_source": current_source,
-                "detected_at": firestore.SERVER_TIMESTAMP,
-            },
-            merge=True,
-        )
-
     for field_path, change in scalar_field_changes(changes):
         provider_ref.collection("field_provenance").document(
             field_provenance_id(field_path)
@@ -319,7 +260,7 @@ def upsert_normalized_provider(provider, metadata, document_category="other"):
 
     provider_ref.set(canonical_provider, merge=True)
     record_provider_revision(provider_ref, metadata, changes, document_category)
-    record_discrepancies_and_provenance(provider_ref, metadata, changes)
+    record_field_provenance(provider_ref, metadata, changes)
     try:
         sync_provider_to_bigquery(provider_id, canonical_provider)
     except Exception:
