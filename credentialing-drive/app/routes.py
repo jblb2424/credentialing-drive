@@ -6,7 +6,9 @@ import logging
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from google.cloud import firestore
+from oauthlib.oauth2.rfc6749.errors import Warning as OAuthScopeWarning
 
+from app.config import SCOPES
 from app.connections import (
     create_flow, credentials_to_dict, get_connection, get_drive_service,
     get_webhook_url, update_connection,
@@ -59,7 +61,6 @@ def google_start():
     flow = create_flow()
     authorization_url, state = flow.authorization_url(
         access_type="offline",
-        include_granted_scopes="true",
         prompt="consent",
     )
     update_connection({"oauth_state": state, "code_verifier": flow.code_verifier})
@@ -81,7 +82,21 @@ def google_callback(request: Request):
     flow.code_verifier = code_verifier
     # Cloud Run terminates TLS before forwarding requests to the container.
     authorization_response = str(request.url.replace(scheme="https"))
-    flow.fetch_token(authorization_response=authorization_response)
+    try:
+        flow.fetch_token(authorization_response=authorization_response)
+    except OAuthScopeWarning as exc:
+        logger.warning("Google OAuth did not return the required Drive scope: %s", exc)
+        raise HTTPException(
+            status_code=400,
+            detail="Google Drive permission was not granted. Start the connection again and approve Drive access.",
+        ) from exc
+
+    granted_scopes = set(flow.credentials.scopes or [])
+    if SCOPES[0] not in granted_scopes:
+        raise HTTPException(
+            status_code=400,
+            detail="Google Drive permission was not granted. Start the connection again and approve Drive access.",
+        )
 
     update_connection(
         {
