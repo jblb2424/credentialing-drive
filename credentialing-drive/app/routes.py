@@ -12,7 +12,7 @@ from app.connections import (
     get_webhook_url, update_connection,
 )
 from app.processing import process_drive_changes, process_drive_document_in_memory
-from app.providers import get_provider, list_providers
+from app.providers import get_entity, get_provider, list_groups, list_providers
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -32,6 +32,26 @@ def get_providers(limit: int = Query(default=100, ge=1, le=500)):
 @router.get("/providers/{provider_id}")
 def get_provider_by_id(provider_id: str):
     return get_provider(provider_id)
+
+
+@router.get("/entities/{entity_id}")
+def get_entity_by_id(entity_id: str):
+    return get_entity(entity_id)
+
+
+@router.get("/entities/{entity_id}/groups")
+def get_entity_groups(entity_id: str, limit: int = Query(default=100, ge=1, le=500)):
+    return {"groups": list_groups(limit, entity_id)}
+
+
+@router.get("/entities/{entity_id}/providers")
+def get_entity_providers(entity_id: str, limit: int = Query(default=100, ge=1, le=500)):
+    return {"providers": list_providers(limit, entity_id)}
+
+
+@router.get("/entities/{entity_id}/providers/{provider_id}")
+def get_entity_provider_by_id(entity_id: str, provider_id: str):
+    return get_provider(provider_id, entity_id)
 
 
 @router.get("/oauth/google/start")

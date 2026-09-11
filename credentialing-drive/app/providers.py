@@ -10,7 +10,9 @@ from fastapi import HTTPException
 from google.cloud import bigquery, firestore
 
 from app.config import (
-    BIGQUERY_REPORTING_DATASET, BIGQUERY_REPORTING_TABLE, PROVIDER_COLLECTION,
+    BIGQUERY_REPORTING_DATASET, BIGQUERY_REPORTING_TABLE, DEFAULT_ENTITY_ID,
+    DEFAULT_ENTITY_NAME, ENTITY_COLLECTION, GROUP_COLLECTION, LOCATION_COLLECTION,
+    PAYER_ENROLLMENT_COLLECTION, PROVIDER_COLLECTION, PROVIDER_GROUP_MEMBERSHIP_COLLECTION,
     PROVIDER_IDENTITY_COLLECTION,
 )
 from app.connections import get_firestore_client, get_project_id
@@ -26,15 +28,46 @@ def serialize_provider(snapshot):
     return {"id": snapshot.id, **provider, "issues": issues, "issue_count": len(issues)}
 
 
-def list_providers(limit):
-    snapshots = get_firestore_client().collection(PROVIDER_COLLECTION).limit(limit).stream()
+def get_entity_ref(client, entity_id=DEFAULT_ENTITY_ID):
+    entity_ref = client.collection(ENTITY_COLLECTION).document(entity_id)
+    if entity_id == DEFAULT_ENTITY_ID:
+        entity_ref.set(
+            {
+                "name": DEFAULT_ENTITY_NAME,
+                "legal_name": DEFAULT_ENTITY_NAME,
+                "status": "sandbox",
+            },
+            merge=True,
+        )
+    return entity_ref
+
+
+def serialize_document(snapshot):
+    return {"id": snapshot.id, **(snapshot.to_dict() or {})}
+
+
+def get_entity(entity_id=DEFAULT_ENTITY_ID):
+    snapshot = get_entity_ref(get_firestore_client(), entity_id).get()
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="Entity not found")
+    return serialize_document(snapshot)
+
+
+def list_groups(limit, entity_id=DEFAULT_ENTITY_ID):
+    entity_ref = get_entity_ref(get_firestore_client(), entity_id)
+    snapshots = entity_ref.collection(GROUP_COLLECTION).limit(limit).stream()
+    return [serialize_document(snapshot) for snapshot in snapshots]
+
+
+def list_providers(limit, entity_id=DEFAULT_ENTITY_ID):
+    entity_ref = get_entity_ref(get_firestore_client(), entity_id)
+    snapshots = entity_ref.collection(PROVIDER_COLLECTION).limit(limit).stream()
     return [serialize_provider(snapshot) for snapshot in snapshots]
 
 
-def get_provider(provider_id):
-    snapshot = (
-        get_firestore_client().collection(PROVIDER_COLLECTION).document(provider_id).get()
-    )
+def get_provider(provider_id, entity_id=DEFAULT_ENTITY_ID):
+    entity_ref = get_entity_ref(get_firestore_client(), entity_id)
+    snapshot = entity_ref.collection(PROVIDER_COLLECTION).document(provider_id).get()
     if not snapshot.exists:
         raise HTTPException(status_code=404, detail="Provider not found")
     return serialize_provider(snapshot)
@@ -67,7 +100,7 @@ def normalize_provider_data(extraction):
     }
 
 
-def resolve_provider_id(client, provider):
+def resolve_provider_id(entity_ref, provider):
     name_key = normalized_key(provider["provider"].get("name"))
     entity_key = normalized_key(provider.get("entity_name"))
     npi = re.sub(r"\D", "", provider["provider"].get("npi") or "")
@@ -81,20 +114,20 @@ def resolve_provider_id(client, provider):
         identity_keys.append(f"name-{entity_key or 'unknown'}-{name_key}")
 
     for identity_key in identity_keys:
-        snapshot = client.collection(PROVIDER_IDENTITY_COLLECTION).document(identity_key).get()
+        snapshot = entity_ref.collection(PROVIDER_IDENTITY_COLLECTION).document(identity_key).get()
         if snapshot.exists:
             provider_id = snapshot.to_dict()["provider_id"]
             for alias_key in identity_keys:
-                client.collection(PROVIDER_IDENTITY_COLLECTION).document(alias_key).set(
+                entity_ref.collection(PROVIDER_IDENTITY_COLLECTION).document(alias_key).set(
                     {"provider_id": provider_id}, merge=True
                 )
             return provider_id
 
     # Names and NPIs are aliases used to match later imports. The provider itself
     # receives an opaque Firestore-generated ID.
-    provider_id = client.collection(PROVIDER_COLLECTION).document().id
+    provider_id = entity_ref.collection(PROVIDER_COLLECTION).document().id
     for identity_key in identity_keys:
-        client.collection(PROVIDER_IDENTITY_COLLECTION).document(identity_key).set(
+        entity_ref.collection(PROVIDER_IDENTITY_COLLECTION).document(identity_key).set(
             {"provider_id": provider_id}, merge=True
         )
     return provider_id
@@ -106,6 +139,77 @@ def merge_unique(existing, incoming):
         if value and value not in values:
             values.append(value)
     return values
+
+
+def resolve_group_ref(entity_ref, provider):
+    group_name = provider.get("group_name") or provider.get("entity_name")
+    if not group_name:
+        return None
+
+    group_key = normalized_key(group_name)
+    identity_ref = entity_ref.collection("group_identities").document(group_key)
+    identity = identity_ref.get()
+    if identity.exists:
+        group_id = identity.to_dict()["group_id"]
+    else:
+        group_id = entity_ref.collection(GROUP_COLLECTION).document().id
+        identity_ref.set({"group_id": group_id})
+
+    group_ref = entity_ref.collection(GROUP_COLLECTION).document(group_id)
+    group_ref.set({"legal_name": group_name}, merge=True)
+    return group_ref
+
+
+def upsert_group_locations(group_ref, locations):
+    location_ids = []
+    for location_name in locations or []:
+        location_key = normalized_key(location_name)
+        if not location_key:
+            continue
+        identity_ref = group_ref.collection("location_identities").document(location_key)
+        identity = identity_ref.get()
+        if identity.exists:
+            location_id = identity.to_dict()["location_id"]
+        else:
+            location_id = group_ref.collection(LOCATION_COLLECTION).document().id
+            identity_ref.set({"location_id": location_id})
+        group_ref.collection(LOCATION_COLLECTION).document(location_id).set(
+            {"display_name": location_name, "type": "unknown"}, merge=True
+        )
+        location_ids.append(location_id)
+    return location_ids
+
+
+def upsert_provider_group_membership(entity_ref, provider_id, group_ref, provider):
+    if not group_ref:
+        return None
+
+    membership_ref = entity_ref.collection(PROVIDER_GROUP_MEMBERSHIP_COLLECTION).document(
+        f"{provider_id}-{group_ref.id}"
+    )
+    location_ids = upsert_group_locations(group_ref, provider.get("locations"))
+    membership_ref.set(
+        {
+            "provider_id": provider_id,
+            "group_id": group_ref.id,
+            "provider_type": provider["provider"].get("credentials"),
+            "location_ids": location_ids,
+        },
+        merge=True,
+    )
+    for payer_name in provider.get("payers") or []:
+        payer_key = normalized_key(payer_name)
+        if payer_key:
+            membership_ref.collection(PAYER_ENROLLMENT_COLLECTION).document(payer_key).set(
+                {
+                    "payer_name": payer_name,
+                    "payer_key": payer_key,
+                    "status": "unknown",
+                    "participating_location_ids": location_ids,
+                },
+                merge=True,
+            )
+    return membership_ref
 
 
 def reporting_values(values):
@@ -123,13 +227,9 @@ def sync_provider_to_bigquery(provider_id, provider):
     profile = provider["provider"]
     row = {
         "provider_id": provider_id,
-        "entity_name": provider.get("entity_name"),
-        "group_name": provider.get("group_name"),
         "provider_name": profile.get("name"),
         "npi": profile.get("npi"),
         "credentials": profile.get("credentials"),
-        "locations": reporting_values(provider.get("locations")),
-        "payers": reporting_values(provider.get("payers")),
         "licenses": reporting_values(provider.get("licenses")),
         "expiration_dates": reporting_values(provider.get("expiration_dates")),
         "synced_at": datetime.now(timezone.utc).isoformat(),
@@ -143,15 +243,6 @@ def sync_provider_to_bigquery(provider_id, provider):
 
 def provider_changes(existing, updated):
     changes = {}
-    for field_name in ("entity_name", "group_name"):
-        previous_value = existing.get(field_name)
-        current_value = updated.get(field_name)
-        if current_value is None or previous_value == current_value:
-            continue
-        changes[field_name] = {"current": current_value}
-        if previous_value is not None:
-            changes[field_name]["previous"] = previous_value
-
     existing_profile = existing.get("provider") or {}
     updated_profile = updated.get("provider") or {}
     profile_changes = {}
@@ -166,7 +257,7 @@ def provider_changes(existing, updated):
     if profile_changes:
         changes["provider"] = profile_changes
 
-    for field_name in ("locations", "payers", "licenses", "expiration_dates"):
+    for field_name in ("licenses", "expiration_dates"):
         added_values = [
             value for value in updated.get(field_name, []) if value not in existing.get(field_name, [])
         ]
@@ -190,11 +281,6 @@ def record_provider_revision(provider_ref, metadata, changes, document_category)
 
 
 def scalar_field_changes(changes):
-    for field_name in ("entity_name", "group_name"):
-        change = changes.get(field_name)
-        if change and "current" in change:
-            yield field_name, change
-
     for field_name, change in (changes.get("provider") or {}).items():
         if "current" in change:
             yield f"provider.{field_name}", change
@@ -229,11 +315,12 @@ def record_field_provenance(provider_ref, metadata, changes):
 
 def upsert_normalized_provider(provider, metadata, document_category="other"):
     client = get_firestore_client()
-    provider_id = resolve_provider_id(client, provider)
+    entity_ref = get_entity_ref(client)
+    provider_id = resolve_provider_id(entity_ref, provider)
     if not provider_id:
         return None
 
-    provider_ref = client.collection(PROVIDER_COLLECTION).document(provider_id)
+    provider_ref = entity_ref.collection(PROVIDER_COLLECTION).document(provider_id)
     existing = provider_ref.get().to_dict() or {}
     existing_profile = existing.get("provider") or {}
     incoming_profile = provider["provider"]
@@ -242,18 +329,14 @@ def upsert_normalized_provider(provider, metadata, document_category="other"):
         for key in ("name", "npi", "credentials")
     }
     canonical_provider = {
-        # Remove the legacy single-document classification from the provider record.
-        "document_type": firestore.DELETE_FIELD,
-        "entity_name": provider.get("entity_name") or existing.get("entity_name"),
-        "group_name": provider.get("group_name") or existing.get("group_name"),
         "provider": merged_profile,
-        "locations": merge_unique(existing.get("locations"), provider.get("locations")),
-        "payers": merge_unique(existing.get("payers"), provider.get("payers")),
         "licenses": merge_unique(existing.get("licenses"), provider.get("licenses")),
         "expiration_dates": merge_unique(
             existing.get("expiration_dates"), provider.get("expiration_dates")
         ),
     }
+    group_ref = resolve_group_ref(entity_ref, provider)
+    upsert_provider_group_membership(entity_ref, provider_id, group_ref, provider)
     changes = provider_changes(existing, canonical_provider)
     if not changes:
         return provider_id
