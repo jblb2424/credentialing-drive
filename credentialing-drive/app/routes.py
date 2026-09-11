@@ -6,7 +6,6 @@ import logging
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from google.cloud import firestore
-from oauthlib.oauth2.rfc6749.errors import Warning as OAuthScopeWarning
 
 from app.config import SCOPES
 from app.connections import (
@@ -84,7 +83,7 @@ def google_callback(request: Request):
     authorization_response = str(request.url.replace(scheme="https"))
     try:
         flow.fetch_token(authorization_response=authorization_response)
-    except OAuthScopeWarning as exc:
+    except Warning as exc:
         logger.warning("Google OAuth did not return the required Drive scope: %s", exc)
         raise HTTPException(
             status_code=400,
