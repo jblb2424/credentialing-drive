@@ -2,9 +2,10 @@ import os
 import secrets
 import uuid
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from google.cloud import firestore
 
 from app.config import SCOPES
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 @router.get("/")
 def home():
-    return {"status": "ok", "service": "credentialing-drive-test"}
+    return FileResponse(Path(__file__).resolve().parent.parent / "static" / "index.html")
 
 
 

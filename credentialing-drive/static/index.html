@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#102a43">
+    <title>Credentialing Operations</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:opsz,wght@5..120,600;5..120,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#overview" aria-label="Credentialing operations home">
+          <span class="brand-mark">C</span>
+          <span>Credentialing<span class="brand-accent">HQ</span></span>
+        </a>
+        <p class="workspace-label">Workspace</p>
+        <nav class="main-nav" aria-label="Primary navigation">
+          <a class="active" href="#overview"><span class="nav-icon">▦</span>Overview</a>
+          <a href="#providers"><span class="nav-icon">◉</span>Providers</a>
+          <a href="#attention"><span class="nav-icon">!</span>Attention queue <span class="nav-count" id="nav-issue-count">0</span></a>
+          <a href="#groups"><span class="nav-icon">⌘</span>Practices</a>
+        </nav>
+        <div class="sidebar-footer">
+          <div class="sandbox-pill"><span></span>Sandbox environment</div>
+          <p>Data refreshes from your connected credentialing workspace.</p>
+        </div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div class="mobile-brand">Credentialing<span>HQ</span></div>
+          <div class="status-line"><span class="live-dot"></span>Live Firestore data</div>
+          <button class="refresh-button" id="refresh-button" type="button">Refresh data <span>↻</span></button>
+        </header>
+
+        <section class="hero" id="overview">
+          <p class="eyebrow">Credentialing overview</p>
+          <h1>Good morning, <span id="entity-name">team</span>.</h1>
+          <p class="lede">Keep enrollment moving by resolving the provider records that need attention first.</p>
+        </section>
+
+        <section class="metrics" aria-label="Credentialing summary">
+          <article class="metric-card metric-primary">
+            <p>Provider records</p>
+            <strong id="provider-count">--</strong>
+            <span id="provider-support">Loading provider directory</span>
+          </article>
+          <article class="metric-card">
+            <p>Practices</p>
+            <strong id="group-count">--</strong>
+            <span>Connected to this client</span>
+          </article>
+          <article class="metric-card metric-warning">
+            <p>Expiring soon</p>
+            <strong id="expiring-count">--</strong>
+            <span>Within the next 90 days</span>
+          </article>
+          <article class="metric-card metric-issue">
+            <p>Open issues</p>
+            <strong id="issue-count">--</strong>
+            <span>Need review or completion</span>
+          </article>
+        </section>
+
+        <section class="attention-panel" id="attention">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Priority work</p>
+              <h2>Attention required</h2>
+            </div>
+            <a href="#providers">View provider directory <span>→</span></a>
+          </div>
+          <div class="attention-list" id="attention-list" aria-live="polite">
+            <div class="loading-row"><span class="spinner"></span>Reviewing current provider records...</div>
+          </div>
+        </section>
+
+        <section class="directory-section" id="providers">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Directory</p>
+              <h2>Provider records</h2>
+            </div>
+            <div class="directory-actions">
+              <label class="search-field" for="provider-search"><span>⌕</span><input id="provider-search" type="search" placeholder="Search providers"></label>
+            </div>
+          </div>
+          <div class="provider-table-wrap">
+            <table class="provider-table">
+              <thead>
+                <tr><th>Provider</th><th>NPI</th><th>Credentials</th><th>Record health</th><th aria-label="Open record"></th></tr>
+              </thead>
+              <tbody id="provider-table-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="groups-section" id="groups">
+          <p class="eyebrow">Practices</p>
+          <div class="group-list" id="group-list"></div>
+        </section>
+      </main>
+    </div>
+
+    <dialog class="provider-dialog" id="provider-dialog" aria-labelledby="provider-dialog-name">
+      <div class="dialog-header">
+        <div>
+          <p class="eyebrow">Provider record</p>
+          <h2 id="provider-dialog-name">Provider details</h2>
+        </div>
+        <button class="close-button" type="button" id="close-dialog" aria-label="Close provider details">×</button>
+      </div>
+      <div id="provider-detail-content"></div>
+    </dialog>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/static/dashboard.js"></script>
+  </body>
+</html>
