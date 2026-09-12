@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 def serialize_provider(snapshot):
     provider = snapshot.to_dict() or {}
+    profile = provider.get("provider") or {}
+    provider["provider"] = enrich_provider_name(profile)
     issues = calculate_provider_issues(snapshot.reference, provider)
     return {"id": snapshot.id, **provider, "issues": issues, "issue_count": len(issues)}
 
@@ -75,6 +77,21 @@ def get_provider(provider_id, entity_id=DEFAULT_ENTITY_ID):
     return provider
 
 
+def get_provider_issue(provider_id, issue_id, entity_id=DEFAULT_ENTITY_ID):
+    provider = get_provider(provider_id, entity_id)
+    issue = next((issue for issue in provider["issues"] if issue["id"] == issue_id), None)
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    return {
+        "issue": issue,
+        "provider": {
+            "id": provider["id"],
+            "name": provider["provider"].get("name"),
+            "npi": provider["provider"].get("npi"),
+        },
+    }
+
+
 def get_provider_affiliations(entity_ref, provider_id):
     """Resolve provider-to-practice relationships for the provider detail response."""
     memberships = entity_ref.collection(PROVIDER_GROUP_MEMBERSHIP_COLLECTION).where(
@@ -112,6 +129,38 @@ def normalized_key(value):
     return re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-")
 
 
+def name_parts(name):
+    """Parse conventional credentialing name formats without guessing ambiguous names."""
+    if not isinstance(name, str) or not name.strip():
+        return {}
+    normalized_name = name.strip()
+    if "," in normalized_name:
+        last_name, given_names = (part.strip() for part in normalized_name.split(",", 1))
+        parts = given_names.split()
+        return {
+            "first_name": parts[0] if parts else None,
+            "middle_name": " ".join(parts[1:]) or None,
+            "last_name": last_name or None,
+        }
+    parts = normalized_name.split()
+    if len(parts) >= 2:
+        return {
+            "first_name": parts[0],
+            "middle_name": " ".join(parts[1:-1]) or None,
+            "last_name": parts[-1],
+        }
+    return {}
+
+
+def enrich_provider_name(profile):
+    profile = dict(profile or {})
+    parsed_parts = name_parts(profile.get("name"))
+    for field_name, parsed_value in parsed_parts.items():
+        if not profile.get(field_name) and parsed_value:
+            profile[field_name] = parsed_value
+    return profile
+
+
 def normalize_provider_data(extraction):
     provider = extraction.get("provider") or {}
     if not isinstance(provider, dict):
@@ -128,7 +177,7 @@ def normalize_provider_data(extraction):
         or None
     )
     npi = provider.get("npi") or extraction.get("npi")
-    profile = {
+    profile = enrich_provider_name({
         "name": name,
         "first_name": provider.get("first_name"),
         "middle_name": provider.get("middle_name"),
@@ -140,7 +189,7 @@ def normalize_provider_data(extraction):
         "npi": str(npi) if npi else None,
         "caqh_id": provider.get("caqh_id") or provider.get("caqh"),
         "address": provider.get("address") or extraction.get("provider_address"),
-    }
+    })
     return {
         "entity_name": extraction.get("entity_name"),
         "group_name": extraction.get("group_name"),

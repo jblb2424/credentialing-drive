@@ -14,7 +14,7 @@ from app.connections import (
     get_webhook_url, update_connection,
 )
 from app.processing import process_drive_changes, process_drive_document_in_memory
-from app.providers import get_entity, get_provider, list_groups, list_providers
+from app.providers import get_entity, get_provider, get_provider_issue, list_groups, list_providers
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -28,6 +28,11 @@ def home():
 @router.get("/providers/{provider_id}/view")
 def provider_view(provider_id: str):
     return FileResponse(Path(__file__).resolve().parent.parent / "static" / "provider.html")
+
+
+@router.get("/providers/{provider_id}/issues/{issue_id}/view")
+def issue_view(provider_id: str, issue_id: str):
+    return FileResponse(Path(__file__).resolve().parent.parent / "static" / "issue.html")
 
 
 
@@ -59,6 +64,11 @@ def get_entity_providers(entity_id: str, limit: int = Query(default=100, ge=1, l
 @router.get("/entities/{entity_id}/providers/{provider_id}")
 def get_entity_provider_by_id(entity_id: str, provider_id: str):
     return get_provider(provider_id, entity_id)
+
+
+@router.get("/entities/{entity_id}/providers/{provider_id}/issues/{issue_id}")
+def get_entity_provider_issue_by_id(entity_id: str, provider_id: str, issue_id: str):
+    return get_provider_issue(provider_id, issue_id, entity_id)
 
 
 @router.get("/oauth/google/start")

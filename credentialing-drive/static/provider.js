@@ -204,7 +204,7 @@ function renderIssues(provider) {
     elements.issues.innerHTML = '<p class="aside-empty">No outstanding issues on this record.</p>';
     return;
   }
-  elements.issues.innerHTML = issues.map((issue) => `<div class="record-issue"><p>${escapeHtml(issueLabel(issue))}</p><span class="severity-tag severity-${escapeHtml(issue.severity || "low")}">${escapeHtml(issue.severity || "review")}</span></div>`).join("");
+  elements.issues.innerHTML = issues.map((issue) => `<a class="record-issue" href="/providers/${encodeURIComponent(provider.id)}/issues/${encodeURIComponent(issue.id)}/view?entity=${entityId}"><p>${escapeHtml(issueLabel(issue))}</p><span class="severity-tag severity-${escapeHtml(issue.severity || "low")}">${escapeHtml(issue.severity || "review")}</span><span class="issue-link">View issue →</span></a>`).join("");
 }
 
 function renderSummary(provider) {

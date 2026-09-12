@@ -83,11 +83,11 @@ function renderAttention() {
     return;
   }
   elements.attentionList.innerHTML = issues.map(({ provider, issue }) => `
-    <button class="attention-row" type="button" data-provider-id="${escapeHtml(provider.id)}">
+    <a class="attention-row" href="/providers/${encodeURIComponent(provider.id)}/issues/${encodeURIComponent(issue.id)}/view?entity=${ENTITY_ID}">
       <span class="attention-provider">${escapeHtml(providerName(provider))}<span>${escapeHtml(provider.provider?.npi || "NPI not yet captured")}</span></span>
       <span class="attention-detail">${escapeHtml(issueLabel(issue))}</span>
       <span class="severity-tag severity-${escapeHtml(issue.severity || "low")}">${escapeHtml(issue.severity || "review")}</span>
-    </button>
+    </a>
   `).join("");
 }
 
@@ -168,9 +168,4 @@ elements.providerTable.addEventListener("keydown", (event) => {
     if (row) openProvider(row.dataset.providerId);
   }
 });
-elements.attentionList.addEventListener("click", (event) => {
-  const row = event.target.closest("[data-provider-id]");
-  if (row) openProvider(row.dataset.providerId);
-});
-
 loadDashboard();
