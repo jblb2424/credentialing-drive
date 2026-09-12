@@ -70,8 +70,9 @@ function humanize(value) {
 
 function issueLabel(issue) {
   const field = humanize((issue.affected_fields || []).join(", "));
-  if (issue.type === "expiring") return `${field || "Credential"} expires in ${issue.days_until_expiration} days`;
-  if (issue.type === "expired") return `${field || "Credential"} is expired`;
+  const credential = issue.credential_label || field || "Credential";
+  if (issue.type === "expiring") return `${credential} expires in ${issue.days_until_expiration} days`;
+  if (issue.type === "expired") return `${credential} is expired`;
   if (issue.type === "missing_data") return `Missing ${field || "critical provider data"}`;
   if (issue.type === "discrepancy") return `Conflicting ${field || "provider information"}`;
   return humanize(issue.type) || "Record needs review";

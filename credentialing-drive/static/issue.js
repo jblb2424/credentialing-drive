@@ -37,13 +37,16 @@ function humanize(value) {
 }
 
 function issueTitle(issue) {
-  return humanize(issue.type) || "Credentialing issue";
+  return issue.credential_label
+    ? `${humanize(issue.type)}: ${issue.credential_label}`
+    : humanize(issue.type) || "Credentialing issue";
 }
 
 function issueDescription(issue) {
   const field = humanize((issue.affected_fields || []).join(", "));
-  if (issue.type === "expired") return `${field || "A credential"} requires immediate attention because it is past its expiration date.`;
-  if (issue.type === "expiring") return `${field || "A credential"} is approaching expiration and should be renewed or verified.`;
+  const credential = issue.credential_label || field || "A credential";
+  if (issue.type === "expired") return `${credential} requires immediate attention because it is past its expiration date.`;
+  if (issue.type === "expiring") return `${credential} is approaching expiration and should be renewed or verified.`;
   if (issue.type === "missing_data") return `This provider record is missing critical information needed for credentialing.`;
   if (issue.type === "discrepancy") return `Two source documents report conflicting information for ${field || "this provider record"}.`;
   return "This provider record needs review.";
@@ -60,6 +63,9 @@ function nextAction(issue) {
 function detailRows(issue) {
   const entries = [
     ["Affected fields", (issue.affected_fields || []).map(humanize).join(", ")],
+    ["Credential", issue.credential_label],
+    ["Credential category", humanize(issue.credential_category)],
+    ["Credential identifier", issue.credential_identifier],
     ["Expiration date", issue.expiration_date],
     ["Days until expiration", issue.days_until_expiration],
     ["Days past expiration", issue.days_past_expiration],
