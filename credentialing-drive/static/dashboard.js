@@ -43,8 +43,15 @@ function providerIssues(provider) {
   return Array.isArray(provider.issues) ? provider.issues : [];
 }
 
+function humanizeField(value) {
+  return String(value || "")
+    .replace("provider.", "")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 function issueLabel(issue) {
-  const field = (issue.affected_fields || []).join(", ").replace("provider.", "");
+  const field = humanizeField((issue.affected_fields || []).join(", "));
   if (issue.type === "expiring") return `${field || "Credential"} expires in ${issue.days_until_expiration} days`;
   if (issue.type === "expired") return `${field || "Credential"} is expired`;
   if (issue.type === "missing_data") return `Missing ${field || "critical provider data"}`;
