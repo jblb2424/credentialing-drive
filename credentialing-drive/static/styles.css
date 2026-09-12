@@ -122,6 +122,7 @@ h2 { font: 700 23px/1.2 "Playfair Display", serif; }
 .back-link { color: var(--pine); font-size: 12px; font-weight: 800; text-decoration: none; }
 .record-content { width: min(1250px, 100%); margin: 0 auto; padding: 29px 32px 75px; }
 .record-loading, .record-error { min-height: 50vh; display: flex; align-items: center; justify-content: center; gap: 11px; color: var(--ink-soft); font-size: 13px; }
+.record-loading[hidden], .record-error[hidden], #record-page[hidden] { display: none !important; }
 .record-error { color: #ad331c; }
 .breadcrumbs { display: flex; gap: 9px; color: #829ab1; font: 500 10px/1.2 "DM Mono", monospace; }
 .breadcrumbs a { color: var(--pine); text-decoration: none; }
