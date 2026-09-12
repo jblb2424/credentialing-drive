@@ -117,20 +117,43 @@ def normalize_provider_data(extraction):
     if not isinstance(provider, dict):
         provider = {"name": str(provider)}
 
-    name = provider.get("name") or extraction.get("provider_name")
+    name = (
+        provider.get("name")
+        or extraction.get("provider_name")
+        or " ".join(
+            part
+            for part in (provider.get("first_name"), provider.get("middle_name"), provider.get("last_name"))
+            if part
+        )
+        or None
+    )
     npi = provider.get("npi") or extraction.get("npi")
+    profile = {
+        "name": name,
+        "first_name": provider.get("first_name"),
+        "middle_name": provider.get("middle_name"),
+        "last_name": provider.get("last_name"),
+        "provider_type": provider.get("provider_type") or provider.get("type"),
+        "credentials": provider.get("credentials") or extraction.get("credentials"),
+        "gender": provider.get("gender"),
+        "date_of_birth": provider.get("date_of_birth") or provider.get("dob"),
+        "npi": str(npi) if npi else None,
+        "caqh_id": provider.get("caqh_id") or provider.get("caqh"),
+        "address": provider.get("address") or extraction.get("provider_address"),
+    }
     return {
         "entity_name": extraction.get("entity_name"),
         "group_name": extraction.get("group_name"),
-        "provider": {
-            "name": name,
-            "npi": str(npi) if npi else None,
-            "credentials": provider.get("credentials") or extraction.get("credentials"),
-        },
-        "locations": extraction.get("locations") or [],
-        "payers": extraction.get("payers") or [],
-        "licenses": extraction.get("licenses") or [],
-        "expiration_dates": extraction.get("expiration_dates") or [],
+        "provider": profile,
+        "locations": as_list(extraction.get("locations")),
+        "provider_locations": as_list(extraction.get("provider_locations")),
+        "payers": as_list(extraction.get("payers")),
+        "payer_enrollments": as_list(extraction.get("payer_enrollments")),
+        "licenses": as_list(extraction.get("licenses")),
+        "specialties": as_list(extraction.get("specialties")),
+        "education": as_list(extraction.get("education")),
+        "liability_insurance": as_list(extraction.get("liability_insurance")),
+        "expiration_dates": as_list(extraction.get("expiration_dates")),
         "summary": extraction.get("summary"),
     }
 
@@ -176,6 +199,52 @@ def merge_unique(existing, incoming):
     return values
 
 
+def as_list(value):
+    if value is None or value == "":
+        return []
+    return value if isinstance(value, list) else [value]
+
+
+def has_value(value):
+    return value not in (None, "", [], {})
+
+
+def merge_profile(existing, incoming):
+    profile = {}
+    for field_name in set(existing) | set(incoming):
+        incoming_value = incoming.get(field_name)
+        existing_value = existing.get(field_name)
+        if isinstance(existing_value, dict) and isinstance(incoming_value, dict):
+            profile[field_name] = merge_profile(existing_value, incoming_value)
+        else:
+            profile[field_name] = incoming_value if has_value(incoming_value) else existing_value
+    return profile
+
+
+def location_display_name(location):
+    if isinstance(location, str):
+        return location
+    if not isinstance(location, dict):
+        return None
+    name = (
+        location.get("display_name")
+        or location.get("name")
+        or location.get("location_name")
+    )
+    if name:
+        return name
+    address = location.get("address")
+    if isinstance(address, str):
+        return address
+    if isinstance(address, dict):
+        return address.get("line1") or address.get("street")
+    return None
+
+
+def present_fields(values):
+    return {field_name: value for field_name, value in values.items() if has_value(value)}
+
+
 def resolve_group_ref(entity_ref, provider):
     group_name = provider.get("group_name") or provider.get("entity_name")
     if not group_name:
@@ -197,7 +266,8 @@ def resolve_group_ref(entity_ref, provider):
 
 def upsert_group_locations(group_ref, locations):
     location_ids = []
-    for location_name in locations or []:
+    for location in locations or []:
+        location_name = location_display_name(location)
         location_key = normalized_key(location_name)
         if not location_key:
             continue
@@ -208,8 +278,21 @@ def upsert_group_locations(group_ref, locations):
         else:
             location_id = group_ref.collection(LOCATION_COLLECTION).document().id
             identity_ref.set({"location_id": location_id})
+        source = location if isinstance(location, dict) else {}
         group_ref.collection(LOCATION_COLLECTION).document(location_id).set(
-            {"display_name": location_name, "type": "unknown"}, merge=True
+            present_fields(
+                {
+                    "display_name": location_name,
+                    "type": source.get("type") or "unknown",
+                    "address": source.get("address"),
+                    "phone": source.get("phone"),
+                    "email": source.get("email"),
+                    "practice_hours": source.get("practice_hours"),
+                    "faxes": source.get("faxes"),
+                    "languages": source.get("languages"),
+                }
+            ),
+            merge=True,
         )
         location_ids.append(location_id)
     return location_ids
@@ -232,16 +315,23 @@ def upsert_provider_group_membership(entity_ref, provider_id, group_ref, provide
         },
         merge=True,
     )
-    for payer_name in provider.get("payers") or []:
+    payer_entries = [{"payer_name": payer_name} for payer_name in provider.get("payers") or []]
+    payer_entries.extend(provider.get("payer_enrollments") or [])
+    for payer in payer_entries:
+        payer = payer if isinstance(payer, dict) else {"payer_name": payer}
+        payer_name = payer.get("payer_name") or payer.get("name")
         payer_key = normalized_key(payer_name)
         if payer_key:
             membership_ref.collection(PAYER_ENROLLMENT_COLLECTION).document(payer_key).set(
-                {
-                    "payer_name": payer_name,
-                    "payer_key": payer_key,
-                    "status": "unknown",
-                    "participating_location_ids": location_ids,
-                },
+                present_fields(
+                    {
+                        "payer_name": payer_name,
+                        "payer_key": payer_key,
+                        "status": payer.get("enrollment_status") or payer.get("status") or "unknown",
+                        "participating_location_ids": location_ids,
+                        "source_status": payer.get("source_status"),
+                    }
+                ),
                 merge=True,
             )
     return membership_ref
@@ -281,10 +371,10 @@ def provider_changes(existing, updated):
     existing_profile = existing.get("provider") or {}
     updated_profile = updated.get("provider") or {}
     profile_changes = {}
-    for field_name in ("name", "npi", "credentials"):
+    for field_name in sorted(set(existing_profile) | set(updated_profile)):
         previous_value = existing_profile.get(field_name)
         current_value = updated_profile.get(field_name)
-        if current_value is None or previous_value == current_value:
+        if not has_value(current_value) or previous_value == current_value:
             continue
         profile_changes[field_name] = {"current": current_value}
         if previous_value is not None:
@@ -292,7 +382,15 @@ def provider_changes(existing, updated):
     if profile_changes:
         changes["provider"] = profile_changes
 
-    for field_name in ("licenses", "expiration_dates"):
+    for field_name in (
+        "provider_locations",
+        "payer_enrollments",
+        "licenses",
+        "specialties",
+        "education",
+        "liability_insurance",
+        "expiration_dates",
+    ):
         added_values = [
             value for value in updated.get(field_name, []) if value not in existing.get(field_name, [])
         ]
@@ -359,13 +457,21 @@ def upsert_normalized_provider(provider, metadata, document_category="other"):
     existing = provider_ref.get().to_dict() or {}
     existing_profile = existing.get("provider") or {}
     incoming_profile = provider["provider"]
-    merged_profile = {
-        key: incoming_profile.get(key) or existing_profile.get(key)
-        for key in ("name", "npi", "credentials")
-    }
+    merged_profile = merge_profile(existing_profile, incoming_profile)
     canonical_provider = {
         "provider": merged_profile,
+        "provider_locations": merge_unique(
+            existing.get("provider_locations"), provider.get("provider_locations")
+        ),
+        "payer_enrollments": merge_unique(
+            existing.get("payer_enrollments"), provider.get("payer_enrollments")
+        ),
         "licenses": merge_unique(existing.get("licenses"), provider.get("licenses")),
+        "specialties": merge_unique(existing.get("specialties"), provider.get("specialties")),
+        "education": merge_unique(existing.get("education"), provider.get("education")),
+        "liability_insurance": merge_unique(
+            existing.get("liability_insurance"), provider.get("liability_insurance")
+        ),
         "expiration_dates": merge_unique(
             existing.get("expiration_dates"), provider.get("expiration_dates")
         ),

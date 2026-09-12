@@ -31,8 +31,18 @@ def interpret_text_with_gemini(ocr_text):
         return {"document_type": "unknown", "summary": "No text extracted"}
 
     prompt = """You interpret healthcare credentialing documents. Return JSON only with these keys:
-document_type, entity_name, group_name, provider, locations, payers, licenses, expiration_dates, and summary.
-`provider` must be an object with name, npi, and credentials. `locations`, `payers`, and `licenses` must be arrays.
+document_type, entity_name, group_name, provider, locations, provider_locations, payers,
+payer_enrollments, licenses, specialties, education, liability_insurance, expiration_dates, and summary.
+`provider` must be an object with name, first_name, middle_name, last_name, provider_type,
+credentials, gender, date_of_birth, npi, caqh_id, and address.
+Each item in `locations` or `provider_locations` may contain display_name, type, address, phone,
+email, practice_hours, faxes, and languages. Each `licenses` item may contain type, license_number,
+issue_date, expiration_date, and state. Each `specialties` item may contain name, board_certified,
+certification_date, expiration_date, and certifying_board. Each `education` item may contain
+education_type, institution_name, degree, specialty, start_date, and end_date. Each
+`liability_insurance` item may contain insurance_type, carrier_name, policy_number, effective_date,
+expiration_date, claim_amount, and aggregate_amount. Each `payer_enrollments` item may contain
+payer_name, group_name, location_names, and enrollment_status.
 Use null or empty arrays when a value is not present. Do not infer values that are not supported by the text.
 
 OCR text:
@@ -71,15 +81,19 @@ def interpret_spreadsheet_with_gemini(rows):
 unknown column names and layouts. Return JSON only in this shape:
 {"providers": [{"source_row_numbers": [2], "document_type": "...",
 "entity_name": null, "group_name": null,
-"provider": {"name": null, "npi": null, "credentials": null},
-"locations": [], "payers": [], "licenses": [], "expiration_dates": [],
+"provider": {"name": null, "first_name": null, "middle_name": null, "last_name": null,
+"provider_type": null, "credentials": null, "gender": null, "date_of_birth": null,
+"npi": null, "caqh_id": null, "address": null},
+"locations": [], "provider_locations": [], "payers": [], "payer_enrollments": [],
+"licenses": [], "specialties": [], "education": [], "liability_insurance": [], "expiration_dates": [],
 "summary": null}]}
 
 Normalize every provider represented in the spreadsheet into this canonical shape.
 Use the original row numbers that support each provider in source_row_numbers. A provider
 may use multiple rows when the layout requires it. Do not infer values that are not in the
 spreadsheet, do not include a provider without a name or NPI, and use null or [] for unknown
-values. Preserve all meaningful payer, location, license, and expiration information.
+values. Preserve all meaningful provider identity, payer, location, license, specialty, education,
+liability coverage, and expiration information using the same structure as the document importer.
 
 Spreadsheet rows (each object contains an original row_number and raw, client-supplied columns):
 """
