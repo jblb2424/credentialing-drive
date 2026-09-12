@@ -14,9 +14,6 @@ const elements = {
   groupList: document.querySelector("#group-list"),
   search: document.querySelector("#provider-search"),
   refresh: document.querySelector("#refresh-button"),
-  dialog: document.querySelector("#provider-dialog"),
-  dialogName: document.querySelector("#provider-dialog-name"),
-  detail: document.querySelector("#provider-detail-content"),
   toast: document.querySelector("#toast"),
 };
 
@@ -130,36 +127,8 @@ function showToast(message) {
   window.setTimeout(() => elements.toast.classList.remove("show"), 3500);
 }
 
-async function openProvider(providerId) {
-  const fallback = state.providers.find((provider) => provider.id === providerId);
-  if (!fallback) return;
-  elements.dialogName.textContent = providerName(fallback);
-  elements.detail.innerHTML = '<div class="detail-content"><div class="loading-row"><span class="spinner"></span>Loading provider record...</div></div>';
-  elements.dialog.showModal();
-  try {
-    const provider = await fetchJson(`/entities/${ENTITY_ID}/providers/${encodeURIComponent(providerId)}`);
-    const profile = provider.provider || {};
-    const issues = providerIssues(provider);
-    const licenses = provider.licenses || [];
-    const expirations = provider.expiration_dates || [];
-    elements.dialogName.textContent = providerName(provider);
-    elements.detail.innerHTML = `
-      <div class="detail-content">
-        <div class="detail-grid">
-          <div class="detail-card"><span>NPI</span><strong>${escapeHtml(profile.npi || "Not provided")}</strong></div>
-          <div class="detail-card"><span>Credentials</span><strong>${escapeHtml(profile.credentials || "Not provided")}</strong></div>
-          <div class="detail-card"><span>Record health</span><strong>${issues.length ? `${issues.length} issue${issues.length === 1 ? "" : "s"}` : "In good standing"}</strong></div>
-        </div>
-        <section class="detail-section"><h3>Outstanding issues</h3>
-          ${issues.length ? `<div class="detail-issues">${issues.map((issue) => `<div class="detail-issue"><span>${escapeHtml(issueLabel(issue))}</span><span class="severity-tag severity-${escapeHtml(issue.severity || "low")}">${escapeHtml(issue.severity || "review")}</span></div>`).join("")}</div>` : '<p class="lede">No outstanding issues for this provider.</p>'}
-        </section>
-        <section class="detail-section"><h3>Licenses</h3><ul class="detail-list">${licenses.length ? licenses.map((license) => `<li>${escapeHtml(typeof license === "object" ? JSON.stringify(license) : license)}</li>`).join("") : '<li>No license data captured yet.</li>'}</ul></section>
-        <section class="detail-section"><h3>Expiration dates</h3><ul class="detail-list">${expirations.length ? expirations.map((date) => `<li>${escapeHtml(date)}</li>`).join("") : '<li>No expiration dates captured yet.</li>'}</ul></section>
-      </div>`;
-  } catch (error) {
-    elements.detail.innerHTML = '<div class="detail-content"><div class="empty-state">This provider record could not be loaded.</div></div>';
-    showToast(error.message);
-  }
+function openProvider(providerId) {
+  window.location.assign(`/providers/${encodeURIComponent(providerId)}/view?entity=${ENTITY_ID}`);
 }
 
 async function loadDashboard() {
@@ -202,10 +171,6 @@ elements.providerTable.addEventListener("keydown", (event) => {
 elements.attentionList.addEventListener("click", (event) => {
   const row = event.target.closest("[data-provider-id]");
   if (row) openProvider(row.dataset.providerId);
-});
-document.querySelector("#close-dialog").addEventListener("click", () => elements.dialog.close());
-elements.dialog.addEventListener("click", (event) => {
-  if (event.target === elements.dialog) elements.dialog.close();
 });
 
 loadDashboard();

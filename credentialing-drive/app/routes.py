@@ -25,6 +25,11 @@ def home():
     return FileResponse(Path(__file__).resolve().parent.parent / "static" / "index.html")
 
 
+@router.get("/providers/{provider_id}/view")
+def provider_view(provider_id: str):
+    return FileResponse(Path(__file__).resolve().parent.parent / "static" / "provider.html")
+
+
 
 @router.get("/providers")
 def get_providers(limit: int = Query(default=100, ge=1, le=500)):

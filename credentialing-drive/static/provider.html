@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#102a43">
+    <title>Provider Record | CredentialingHQ</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:opsz,wght@5..120,600;5..120,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <div class="record-shell">
+      <header class="record-topbar">
+        <a class="brand record-brand" href="/"><span class="brand-mark">C</span><span>Credentialing<span class="brand-accent">HQ</span></span></a>
+        <a class="back-link" href="/">← Back to overview</a>
+      </header>
+      <main class="record-content">
+        <div id="record-loading" class="record-loading"><span class="spinner"></span>Loading provider record...</div>
+        <div id="record-error" class="record-error" hidden></div>
+        <div id="record-page" hidden>
+          <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">Dashboard</a><span>/</span><span id="crumb-client">Client</span><span>/</span><strong id="crumb-provider">Provider</strong></nav>
+          <section class="record-hero">
+            <div>
+              <p class="eyebrow">Provider plan data</p>
+              <h1 id="provider-name">Provider record</h1>
+              <p class="record-subtitle" id="provider-subtitle">Credentialing profile</p>
+            </div>
+            <div class="record-health" id="record-health"></div>
+          </section>
+          <nav class="record-nav" aria-label="Provider record sections">
+            <a href="#profile">Profile</a><a href="#licenses">Licenses</a><a href="#specialties">Specialties</a><a href="#education">Education</a><a href="#coverage">Coverage</a><a href="#enrollment">Enrollment</a>
+          </nav>
+          <div class="record-grid">
+            <div class="record-main">
+              <section class="record-section" id="profile">
+                <div class="section-title"><div><p class="eyebrow">Identity</p><h2>Professional profile</h2></div><span class="section-marker">01</span></div>
+                <div class="data-grid" id="identity-grid"></div>
+                <div class="subsection"><h3>Provider address</h3><p class="address-value" id="provider-address">Not yet captured</p></div>
+              </section>
+              <section class="record-section" id="locations">
+                <div class="section-title"><div><p class="eyebrow">Care delivery</p><h2>Practice locations</h2></div><span class="section-marker">02</span></div>
+                <div class="location-grid" id="location-list"></div>
+              </section>
+              <section class="record-section" id="licenses">
+                <div class="section-title"><div><p class="eyebrow">Credentials</p><h2>Licenses</h2></div><span class="section-marker">03</span></div>
+                <div class="detail-table-wrap"><table class="detail-table"><thead><tr><th>Type</th><th>License #</th><th>State</th><th>Issued</th><th>Expires</th></tr></thead><tbody id="license-list"></tbody></table></div>
+              </section>
+              <section class="record-section" id="specialties">
+                <div class="section-title"><div><p class="eyebrow">Qualifications</p><h2>Specialties &amp; board certification</h2></div><span class="section-marker">04</span></div>
+                <div class="certification-grid" id="specialty-list"></div>
+              </section>
+              <section class="record-section" id="education">
+                <div class="section-title"><div><p class="eyebrow">Training</p><h2>Education</h2></div><span class="section-marker">05</span></div>
+                <div class="timeline" id="education-list"></div>
+              </section>
+              <section class="record-section" id="coverage">
+                <div class="section-title"><div><p class="eyebrow">Risk</p><h2>Liability insurance</h2></div><span class="section-marker">06</span></div>
+                <div class="coverage-grid" id="insurance-list"></div>
+              </section>
+              <section class="record-section" id="enrollment">
+                <div class="section-title"><div><p class="eyebrow">Network</p><h2>Payer enrollment</h2></div><span class="section-marker">07</span></div>
+                <div class="detail-table-wrap"><table class="detail-table"><thead><tr><th>Payer</th><th>Practice</th><th>Locations</th><th>Enrollment status</th></tr></thead><tbody id="payer-list"></tbody></table></div>
+              </section>
+            </div>
+            <aside class="record-aside">
+              <section class="aside-card"><p class="eyebrow">Record integrity</p><h2>Open issues</h2><div class="issue-stack" id="issue-list"></div></section>
+              <section class="aside-card"><p class="eyebrow">At a glance</p><div class="summary-list" id="summary-list"></div></section>
+            </aside>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script src="/static/provider.js"></script>
+  </body>
+</html>

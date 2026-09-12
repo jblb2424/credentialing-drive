@@ -116,10 +116,85 @@ h2 { font: 700 23px/1.2 "Playfair Display", serif; }
 .toast { position: fixed; right: 26px; bottom: 26px; max-width: min(360px, calc(100vw - 52px)); padding: 13px 15px; border-radius: 8px; color: white; background: var(--ink); box-shadow: var(--shadow); font-size: 12px; opacity: 0; transform: translateY(12px); pointer-events: none; transition: opacity .2s, transform .2s; }
 .toast.show { opacity: 1; transform: translateY(0); }
 
+.record-shell { min-height: 100vh; background: #f4f7f7; }
+.record-topbar { display: flex; align-items: center; justify-content: space-between; min-height: 76px; padding: 0 max(32px, calc((100vw - 1250px) / 2)); border-bottom: 1px solid rgba(217,226,236,.9); background: var(--paper); }
+.record-brand { color: var(--ink); font-size: 18px; }
+.back-link { color: var(--pine); font-size: 12px; font-weight: 800; text-decoration: none; }
+.record-content { width: min(1250px, 100%); margin: 0 auto; padding: 29px 32px 75px; }
+.record-loading, .record-error { min-height: 50vh; display: flex; align-items: center; justify-content: center; gap: 11px; color: var(--ink-soft); font-size: 13px; }
+.record-error { color: #ad331c; }
+.breadcrumbs { display: flex; gap: 9px; color: #829ab1; font: 500 10px/1.2 "DM Mono", monospace; }
+.breadcrumbs a { color: var(--pine); text-decoration: none; }
+.breadcrumbs strong { color: var(--ink-soft); font-weight: 500; }
+.record-hero { display: flex; align-items: end; justify-content: space-between; gap: 25px; padding: 37px 0 28px; }
+.record-hero h1 { font-size: 43px; }
+.record-subtitle { margin: 11px 0 0; color: var(--ink-soft); font-size: 13px; }
+.record-health { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; padding: 10px 12px; border: 1px solid #c7e6dc; border-radius: 99px; color: var(--pine); background: #f0faf6; font: 500 10px/1 "DM Mono", monospace; }
+.health-dot { width: 7px; height: 7px; border-radius: 50%; background: #2eaf88; }
+.health-dot.attention { background: var(--coral); }
+.record-nav { display: flex; gap: 24px; overflow-x: auto; padding: 14px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.record-nav a { color: var(--ink-soft); font: 700 11px/1 Manrope, sans-serif; text-decoration: none; white-space: nowrap; }
+.record-nav a:hover { color: var(--pine); }
+.record-grid { display: grid; grid-template-columns: minmax(0, 1fr) 295px; gap: 28px; align-items: start; margin-top: 30px; }
+.record-main { display: grid; gap: 18px; }
+.record-section, .aside-card { padding: 28px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+.section-title { display: flex; align-items: start; justify-content: space-between; gap: 15px; margin-bottom: 22px; }
+.section-title h2, .aside-card h2 { font-size: 21px; }
+.section-marker { color: #9fb3c8; font: 500 11px/1 "DM Mono", monospace; }
+.data-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid #edf2f7; border-left: 1px solid #edf2f7; }
+.data-field { min-height: 79px; padding: 13px; border-right: 1px solid #edf2f7; border-bottom: 1px solid #edf2f7; }
+.data-field span, .summary-list span { display: block; color: #829ab1; font: 500 9px/1.2 "DM Mono", monospace; letter-spacing: .07em; text-transform: uppercase; }
+.data-field strong { display: block; margin-top: 8px; color: var(--ink); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+.subsection { margin-top: 20px; }
+.subsection h3 { margin: 0 0 8px; color: var(--ink); font-size: 12px; }
+.address-value { margin: 0; color: var(--ink-soft); font-size: 12px; line-height: 1.7; }
+.location-grid, .certification-grid, .coverage-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+.location-card, .certification-card, .coverage-card { padding: 17px; border: 1px solid #e6edf1; border-radius: 8px; background: #fbfcfd; }
+.location-type, .practice-note, .table-note { color: var(--pine); font: 500 9px/1 "DM Mono", monospace; text-transform: uppercase; }
+.location-card h3, .certification-card h3, .coverage-card h3 { margin: 9px 0 6px; color: var(--ink); font-size: 13px; }
+.location-card p { margin: 0; color: var(--ink-soft); font-size: 11px; line-height: 1.6; }
+.practice-note { display: block; margin-top: 11px; color: #829ab1; }
+.detail-table-wrap { overflow-x: auto; }
+.detail-table { width: 100%; border-collapse: collapse; text-align: left; }
+.detail-table th { padding: 0 11px 12px; color: #829ab1; font: 500 9px/1 "DM Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.detail-table td { padding: 13px 11px; border-top: 1px solid #edf2f7; color: var(--ink-soft); font-size: 11px; line-height: 1.45; vertical-align: top; }
+.detail-table td strong { color: var(--ink); }
+.record-table-empty { color: #829ab1 !important; text-align: center; }
+.certification-card p, .coverage-card p { margin: 0; color: var(--pine); font: 500 9px/1.2 "DM Mono", monospace; text-transform: uppercase; }
+.certification-card strong { display: block; margin: 9px 0 16px; color: var(--ink); font-size: 12px; }
+.certification-card dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; margin: 0; }
+.certification-card dt { color: #829ab1; font: 500 8px/1 "DM Mono", monospace; text-transform: uppercase; }
+.certification-card dd { margin: 5px 0 0; color: var(--ink-soft); font-size: 10px; line-height: 1.4; }
+.timeline { display: grid; gap: 2px; }
+.timeline-item { position: relative; display: grid; grid-template-columns: 17px 1fr; gap: 13px; min-height: 78px; }
+.timeline-item > span { position: relative; width: 9px; height: 9px; margin-top: 4px; border: 2px solid var(--pine); border-radius: 50%; background: white; }
+.timeline-item:not(:last-child) > span::after { content: ""; position: absolute; top: 7px; left: 2px; width: 1px; height: 73px; background: #d9e2ec; }
+.timeline-item p { margin: 0; color: var(--pine); font: 500 9px/1.2 "DM Mono", monospace; text-transform: uppercase; }
+.timeline-item h3 { margin: 6px 0 4px; color: var(--ink); font-size: 12px; }
+.timeline-meta { color: var(--ink-soft); font-size: 11px; }
+.coverage-card h3 { margin-top: 8px; }
+.coverage-row { display: flex; justify-content: space-between; gap: 13px; margin-top: 10px; color: #829ab1; font-size: 10px; }
+.coverage-row strong { color: var(--ink-soft); font-weight: 700; text-align: right; }
+.enrollment-status { display: inline-block; padding: 5px 7px; border-radius: 99px; color: var(--pine); background: var(--mint); font: 500 9px/1 "DM Mono", monospace; }
+.record-aside { position: sticky; top: 20px; display: grid; gap: 15px; }
+.aside-card { padding: 21px; }
+.aside-card h2 { margin-top: 0; }
+.issue-stack { display: grid; gap: 9px; margin-top: 17px; }
+.record-issue { padding: 11px; border-radius: 7px; background: #f8fbfc; }
+.record-issue p { margin: 0 0 8px; color: var(--ink-soft); font-size: 11px; line-height: 1.55; }
+.aside-empty { margin: 15px 0 0; color: var(--ink-soft); font-size: 11px; line-height: 1.6; }
+.summary-list { display: grid; gap: 13px; margin-top: 18px; }
+.summary-list div { padding-bottom: 12px; border-bottom: 1px solid #edf2f7; }
+.summary-list div:last-child { padding-bottom: 0; border-bottom: 0; }
+.summary-list strong { display: block; margin-top: 5px; color: var(--ink); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+.record-empty { padding: 17px; border: 1px dashed #cbd8e5; border-radius: 8px; color: #829ab1; background: #fbfcfd; font-size: 11px; line-height: 1.6; }
+
 @media (max-width: 980px) {
   .app-shell { grid-template-columns: 196px minmax(0, 1fr); }
   .content { padding: 0 32px 55px; }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .record-grid { grid-template-columns: 1fr; }
+  .record-aside { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 700px) {
   .app-shell { display: block; }
@@ -139,4 +214,13 @@ h2 { font: 700 23px/1.2 "Playfair Display", serif; }
   .attention-detail { grid-column: 1 / -1; }
   .search-field { width: 150px; }
   .detail-grid { grid-template-columns: 1fr; }
+  .record-topbar { min-height: 66px; padding: 0 18px; }
+  .record-content { padding: 23px 18px 45px; }
+  .record-hero { display: block; padding: 30px 0 22px; }
+  .record-hero h1 { font-size: 34px; }
+  .record-health { margin-top: 16px; }
+  .record-grid { margin-top: 19px; }
+  .record-section, .aside-card { padding: 20px; }
+  .data-grid, .location-grid, .certification-grid, .coverage-grid, .record-aside { grid-template-columns: 1fr; }
+  .record-nav { gap: 17px; }
 }

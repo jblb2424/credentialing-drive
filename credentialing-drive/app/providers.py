@@ -70,7 +70,42 @@ def get_provider(provider_id, entity_id=DEFAULT_ENTITY_ID):
     snapshot = entity_ref.collection(PROVIDER_COLLECTION).document(provider_id).get()
     if not snapshot.exists:
         raise HTTPException(status_code=404, detail="Provider not found")
-    return serialize_provider(snapshot)
+    provider = serialize_provider(snapshot)
+    provider["affiliations"] = get_provider_affiliations(entity_ref, provider_id)
+    return provider
+
+
+def get_provider_affiliations(entity_ref, provider_id):
+    """Resolve provider-to-practice relationships for the provider detail response."""
+    memberships = entity_ref.collection(PROVIDER_GROUP_MEMBERSHIP_COLLECTION).where(
+        "provider_id", "==", provider_id
+    ).stream()
+    affiliations = []
+    for membership_snapshot in memberships:
+        membership = membership_snapshot.to_dict() or {}
+        group_ref = entity_ref.collection(GROUP_COLLECTION).document(membership["group_id"])
+        group_snapshot = group_ref.get()
+        locations = []
+        for location_id in membership.get("location_ids") or []:
+            location_snapshot = group_ref.collection(LOCATION_COLLECTION).document(location_id).get()
+            if location_snapshot.exists:
+                locations.append(serialize_document(location_snapshot))
+        payer_enrollments = [
+            serialize_document(snapshot)
+            for snapshot in membership_snapshot.reference.collection(
+                PAYER_ENROLLMENT_COLLECTION
+            ).stream()
+        ]
+        affiliations.append(
+            {
+                "id": membership_snapshot.id,
+                **membership,
+                "group": serialize_document(group_snapshot) if group_snapshot.exists else None,
+                "locations": locations,
+                "payer_enrollments": payer_enrollments,
+            }
+        )
+    return affiliations
 
 
 def normalized_key(value):
