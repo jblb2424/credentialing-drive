@@ -34,10 +34,16 @@ function formatAddress(address) {
   if (typeof address === "string") return address;
   if (typeof address !== "object") return null;
   return [
-    address.line1 || address.street || address.address_1,
+    address.line1 || address.street || address.address_1 || address.address,
     address.line2 || address.address_2,
     [address.city, address.state, address.zip || address.postal_code].filter(Boolean).join(", "),
   ].filter(Boolean).join(" · ");
+}
+
+function textList(input) {
+  if (Array.isArray(input)) return input.filter(Boolean).join(", ");
+  if (input && typeof input === "object") return Object.values(input).filter(Boolean).join(", ");
+  return input;
 }
 
 function fieldGrid(entries) {
@@ -50,9 +56,13 @@ function renderLocations(locations) {
     return;
   }
   elements.locations.innerHTML = locations.map((location) => {
-    const details = [formatAddress(location.address), location.phone, location.email].filter(Boolean).join(" · ");
-    const supporting = [location.practice_hours && `Hours: ${location.practice_hours}`, location.faxes && `Fax: ${location.faxes}`, location.languages && `Languages: ${Array.isArray(location.languages) ? location.languages.join(", ") : location.languages}`].filter(Boolean).join(" · ");
-    return `<article class="location-card"><span class="location-type">${escapeHtml(value(location.type || "Practice location"))}</span><h3>${escapeHtml(value(location.display_name || location.name))}</h3><p>${escapeHtml(value(details))}</p>${supporting ? `<span class="practice-note">${escapeHtml(supporting)}</span>` : ""}</article>`;
+    const embeddedAddress = typeof location.display_name === "object" ? location.display_name : null;
+    const title = typeof location.display_name === "string"
+      ? location.display_name
+      : typeof location.name === "string" ? location.name : "Practice location";
+    const details = [formatAddress(location.address || embeddedAddress), textList(location.phone), textList(location.email)].filter(Boolean).join(" · ");
+    const supporting = [location.practice_hours && `Hours: ${textList(location.practice_hours)}`, location.faxes && `Fax: ${textList(location.faxes)}`, location.languages && `Languages: ${textList(location.languages)}`].filter(Boolean).join(" · ");
+    return `<article class="location-card"><span class="location-type">${escapeHtml(value(location.type || "Practice location"))}</span><h3>${escapeHtml(value(title))}</h3><p>${escapeHtml(value(details))}</p>${supporting ? `<span class="practice-note">${escapeHtml(supporting)}</span>` : ""}</article>`;
   }).join("");
 }
 

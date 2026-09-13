@@ -350,8 +350,16 @@ def location_display_name(location):
         or location.get("name")
         or location.get("location_name")
     )
-    if name:
+    if isinstance(name, str) and name.strip():
         return name
+    if isinstance(name, dict):
+        return (
+            name.get("display_name")
+            or name.get("name")
+            or name.get("line1")
+            or name.get("street")
+            or name.get("address")
+        )
     address = location.get("address")
     if isinstance(address, str):
         return address
@@ -420,12 +428,13 @@ def upsert_group_locations(group_ref, locations):
             location_id = group_ref.collection(LOCATION_COLLECTION).document().id
             identity_ref.set({"location_id": location_id})
         source = location if isinstance(location, dict) else {}
+        embedded_address = source.get("display_name") if isinstance(source.get("display_name"), dict) else None
         group_ref.collection(LOCATION_COLLECTION).document(location_id).set(
             present_fields(
                 {
                     "display_name": location_name,
                     "type": source.get("type") or "unknown",
-                    "address": source.get("address"),
+                    "address": source.get("address") or embedded_address,
                     "phone": source.get("phone"),
                     "email": source.get("email"),
                     "practice_hours": source.get("practice_hours"),
