@@ -10,9 +10,7 @@ const elements = {
   issueCount: document.querySelector("#issue-count"),
   navIssueCount: document.querySelector("#nav-issue-count"),
   attentionList: document.querySelector("#attention-list"),
-  providerTable: document.querySelector("#provider-table-body"),
   groupList: document.querySelector("#group-list"),
-  search: document.querySelector("#provider-search"),
   refresh: document.querySelector("#refresh-button"),
   toast: document.querySelector("#toast"),
 };
@@ -92,30 +90,6 @@ function renderAttention() {
   `).join("");
 }
 
-function recordHealth(provider) {
-  const count = providerIssues(provider).length;
-  return count ? `<span class="record-status needs-review">${count} open ${count === 1 ? "issue" : "issues"}</span>` : '<span class="record-status">In good standing</span>';
-}
-
-function renderProviders() {
-  const query = elements.search.value.trim().toLowerCase();
-  const providers = state.providers.filter((provider) => [providerName(provider), provider.provider?.npi, provider.provider?.credentials]
-    .filter(Boolean).join(" ").toLowerCase().includes(query));
-  if (!providers.length) {
-    elements.providerTable.innerHTML = '<tr><td colspan="5" class="empty-state">No provider records match this search.</td></tr>';
-    return;
-  }
-  elements.providerTable.innerHTML = providers.map((provider) => `
-    <tr tabindex="0" role="button" data-provider-id="${escapeHtml(provider.id)}">
-      <td>${escapeHtml(providerName(provider))}</td>
-      <td>${escapeHtml(provider.provider?.npi || "Not provided")}</td>
-      <td>${escapeHtml(provider.provider?.credentials || "—")}</td>
-      <td>${recordHealth(provider)}</td>
-      <td class="open-record">→</td>
-    </tr>
-  `).join("");
-}
-
 function renderGroups() {
   elements.groupList.innerHTML = state.groups.length
     ? state.groups.map((group) => `<a class="group-chip" href="/practices/${encodeURIComponent(group.id)}/view?entity=${ENTITY_ID}">${escapeHtml(group.legal_name || group.name || "Unnamed practice")}<span aria-hidden="true">→</span></a>`).join("")
@@ -128,17 +102,13 @@ function showToast(message) {
   window.setTimeout(() => elements.toast.classList.remove("show"), 3500);
 }
 
-function openProvider(providerId) {
-  window.location.assign(`/providers/${encodeURIComponent(providerId)}/view?entity=${ENTITY_ID}`);
-}
-
 async function loadDashboard() {
   elements.refresh.disabled = true;
   try {
     const [entity, groupsResponse, providersResponse] = await Promise.all([
       fetchJson(`/entities/${ENTITY_ID}`),
       fetchJson(`/entities/${ENTITY_ID}/groups`),
-      fetchJson(`/entities/${ENTITY_ID}/providers`),
+      fetchJson(`/entities/${ENTITY_ID}/providers?limit=500`),
     ]);
     state.entity = entity;
     state.groups = groupsResponse.groups || [];
@@ -146,11 +116,9 @@ async function loadDashboard() {
     elements.entityName.textContent = entity.name || entity.legal_name || "team";
     renderMetrics();
     renderAttention();
-    renderProviders();
     renderGroups();
   } catch (error) {
     elements.attentionList.innerHTML = `<div class="empty-state">Unable to load credentialing data. ${escapeHtml(error.message)}</div>`;
-    elements.providerTable.innerHTML = '<tr><td colspan="5" class="empty-state">The provider directory is temporarily unavailable.</td></tr>';
     showToast("Could not refresh dashboard data.");
   } finally {
     elements.refresh.disabled = false;
@@ -158,15 +126,4 @@ async function loadDashboard() {
 }
 
 elements.refresh.addEventListener("click", loadDashboard);
-elements.search.addEventListener("input", renderProviders);
-elements.providerTable.addEventListener("click", (event) => {
-  const row = event.target.closest("[data-provider-id]");
-  if (row) openProvider(row.dataset.providerId);
-});
-elements.providerTable.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" || event.key === " ") {
-    const row = event.target.closest("[data-provider-id]");
-    if (row) openProvider(row.dataset.providerId);
-  }
-});
 loadDashboard();

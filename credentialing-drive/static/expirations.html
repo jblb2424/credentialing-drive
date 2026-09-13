@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#102a43">
+    <title>Expirations | CredentialingHQ</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:opsz,wght@5..120,600;5..120,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="/"><span class="brand-mark">C</span><span>Credentialing<span class="brand-accent">HQ</span></span></a>
+        <p class="workspace-label">Workspace</p>
+        <nav class="main-nav" aria-label="Primary navigation">
+          <a href="/"><span class="nav-icon">▦</span>Overview</a>
+          <a href="/providers/view?entity=dummy-client"><span class="nav-icon">◉</span>Providers</a>
+          <a href="/enrollment/view?entity=dummy-client"><span class="nav-icon">↔</span>Enrollment</a>
+          <a class="active" href="/expirations/view?entity=dummy-client"><span class="nav-icon">◷</span>Expirations</a>
+          <a href="/tasks/view?entity=dummy-client"><span class="nav-icon">✓</span>Tasks</a>
+          <a href="/reports/view?entity=dummy-client"><span class="nav-icon">▤</span>Reports</a>
+          <a href="/settings/view?entity=dummy-client"><span class="nav-icon">⚙</span>Settings</a>
+        </nav>
+        <div class="sidebar-footer"><div class="sandbox-pill"><span></span>Sandbox environment</div><p>Data refreshes from your connected credentialing workspace.</p></div>
+      </aside>
+      <main class="workspace-content">
+        <header class="topbar"><div class="mobile-brand">Credentialing<span>HQ</span></div><div class="status-line"><span class="live-dot"></span>Live Firestore data</div></header>
+        <section class="workspace-hero"><p class="eyebrow">Credential lifecycle</p><h1>Expirations</h1><p class="lede">Every captured credential expiration across this client, with expired records first and upcoming dates in order.</p></section>
+        <section class="workspace-panel">
+          <div class="section-heading"><div><p class="eyebrow">All captured dates</p><h2><span id="expiration-count">--</span> expiration records</h2></div></div>
+          <div class="provider-table-wrap"><table class="provider-table expiration-table"><thead><tr><th>Credential</th><th>Provider</th><th>Expiration date</th><th>Status</th><th aria-label="Open provider"></th></tr></thead><tbody id="expiration-table-body"><tr><td colspan="5" class="record-table-empty">Loading expiration records...</td></tr></tbody></table></div>
+        </section>
+      </main>
+    </div>
+    <script src="/static/expirations.js"></script>
+  </body>
+</html>

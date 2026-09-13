@@ -14,7 +14,10 @@ from app.connections import (
     get_webhook_url, update_connection,
 )
 from app.processing import process_drive_changes, process_drive_document_in_memory
-from app.providers import get_entity, get_group, get_provider, get_provider_issue, list_groups, list_providers
+from app.providers import (
+    get_entity, get_group, get_provider, get_provider_issue, list_groups,
+    list_provider_expirations, list_providers,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -33,6 +36,24 @@ def provider_view(provider_id: str):
 @router.get("/practices/{group_id}/view")
 def practice_view(group_id: str):
     return FileResponse(Path(__file__).resolve().parent.parent / "static" / "practice.html")
+
+
+@router.get("/providers/view")
+def providers_view():
+    return FileResponse(Path(__file__).resolve().parent.parent / "static" / "providers.html")
+
+
+@router.get("/expirations/view")
+def expirations_view():
+    return FileResponse(Path(__file__).resolve().parent.parent / "static" / "expirations.html")
+
+
+@router.get("/enrollment/view")
+@router.get("/tasks/view")
+@router.get("/reports/view")
+@router.get("/settings/view")
+def workspace_placeholder_view():
+    return FileResponse(Path(__file__).resolve().parent.parent / "static" / "workspace.html")
 
 
 @router.get("/providers/{provider_id}/issues/{issue_id}/view")
@@ -69,6 +90,11 @@ def get_entity_group_by_id(entity_id: str, group_id: str):
 @router.get("/entities/{entity_id}/providers")
 def get_entity_providers(entity_id: str, limit: int = Query(default=100, ge=1, le=500)):
     return {"providers": list_providers(limit, entity_id)}
+
+
+@router.get("/entities/{entity_id}/expirations")
+def get_entity_expirations(entity_id: str, limit: int = Query(default=1000, ge=1, le=5000)):
+    return {"expirations": list_provider_expirations(limit, entity_id)}
 
 
 @router.get("/entities/{entity_id}/providers/{provider_id}")

@@ -4,7 +4,7 @@ import logging
 import os
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import HTTPException
 from google.cloud import bigquery, firestore
@@ -16,7 +16,7 @@ from app.config import (
     PROVIDER_IDENTITY_COLLECTION,
 )
 from app.connections import get_firestore_client, get_project_id
-from app.issues import calculate_provider_issues
+from app.issues import calculate_provider_issues, expiration_records
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +87,31 @@ def list_providers(limit, entity_id=DEFAULT_ENTITY_ID):
     entity_ref = get_entity_ref(get_firestore_client(), entity_id)
     snapshots = entity_ref.collection(PROVIDER_COLLECTION).limit(limit).stream()
     return [serialize_provider(snapshot) for snapshot in snapshots]
+
+
+def list_provider_expirations(limit, entity_id=DEFAULT_ENTITY_ID):
+    entity_ref = get_entity_ref(get_firestore_client(), entity_id)
+    records = []
+    for snapshot in entity_ref.collection(PROVIDER_COLLECTION).stream():
+        provider = snapshot.to_dict() or {}
+        profile = enrich_provider_name(provider.get("provider") or {})
+        for record in expiration_records(provider):
+            records.append(
+                {
+                    **record,
+                    "provider_id": snapshot.id,
+                    "provider_name": profile.get("name") or "Unnamed provider",
+                    "provider_npi": profile.get("npi"),
+                }
+            )
+
+    def sort_key(record):
+        expiration_date = date.fromisoformat(record["expiration_date"])
+        if record["type"] == "expired":
+            return (0, -expiration_date.toordinal())
+        return (1, expiration_date.toordinal())
+
+    return sorted(records, key=sort_key)[:limit]
 
 
 def get_provider(provider_id, entity_id=DEFAULT_ENTITY_ID):

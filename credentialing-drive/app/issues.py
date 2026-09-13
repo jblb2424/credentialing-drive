@@ -151,7 +151,7 @@ def structured_expiration_candidates(provider):
     return candidates
 
 
-def expiration_issue(candidate):
+def expiration_record(candidate):
     expiration_date = candidate["expiration_date"]
     days_until_expiration = (expiration_date - date.today()).days
     category = candidate["category"]
@@ -161,44 +161,35 @@ def expiration_issue(candidate):
     else:
         issue_id = f"{issue_prefix}-{category}-{candidate['index']}-{expiration_date.isoformat()}"
 
-    issue_details = {
+    record = {
+        "id": issue_id,
+        "type": "expired" if days_until_expiration < 0 else "expiring",
+        "severity": "high" if days_until_expiration < 0 else "medium",
+        "affected_fields": [candidate["field_path"]],
         "expiration_date": expiration_date.isoformat(),
         "credential_category": category,
         "credential_label": candidate["label"],
         "credential_identifier": candidate.get("identifier"),
     }
     if days_until_expiration < 0:
-        return build_issue(
-            issue_id,
-            "expired",
-            "high",
-            [candidate["field_path"]],
-            days_past_expiration=abs(days_until_expiration),
-            **issue_details,
-        )
-    if days_until_expiration <= EXPIRING_WINDOW_DAYS:
-        return build_issue(
-            issue_id,
-            "expiring",
-            "medium",
-            [candidate["field_path"]],
-            days_until_expiration=days_until_expiration,
-            **issue_details,
-        )
-    return None
+        record["days_past_expiration"] = abs(days_until_expiration)
+    else:
+        record["days_until_expiration"] = days_until_expiration
+        if days_until_expiration > EXPIRING_WINDOW_DAYS:
+            record["type"] = "current"
+            record["severity"] = "low"
+    return record
 
 
-def expiration_issues(provider):
+def expiration_candidates(provider):
     candidates = structured_expiration_candidates(provider)
-    issues = [issue for candidate in candidates if (issue := expiration_issue(candidate))]
     structured_dates = {candidate["expiration_date"] for candidate in candidates}
 
     for raw_value in provider.get("expiration_dates") or []:
         expiration_date = parse_expiration_date(raw_value)
         if not expiration_date or expiration_date in structured_dates:
             continue
-
-        issue = expiration_issue(
+        candidates.append(
             {
                 "category": "unclassified",
                 "label": "Unclassified credential",
@@ -207,9 +198,28 @@ def expiration_issues(provider):
                 "index": 0,
             }
         )
-        if issue:
-            issues.append(issue)
-    return issues
+    return candidates
+
+
+def expiration_issue(candidate):
+    record = expiration_record(candidate)
+    if record["type"] == "current":
+        return None
+    return build_issue(
+        record.pop("id"),
+        record.pop("type"),
+        record.pop("severity"),
+        record.pop("affected_fields"),
+        **record,
+    )
+
+
+def expiration_records(provider):
+    return [expiration_record(candidate) for candidate in expiration_candidates(provider)]
+
+
+def expiration_issues(provider):
+    return [issue for candidate in expiration_candidates(provider) if (issue := expiration_issue(candidate))]
 
 
 def missing_data_issues(provider):

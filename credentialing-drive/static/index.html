@@ -19,10 +19,13 @@
         </a>
         <p class="workspace-label">Workspace</p>
         <nav class="main-nav" aria-label="Primary navigation">
-          <a class="active" href="#overview"><span class="nav-icon">▦</span>Overview</a>
-          <a href="#providers"><span class="nav-icon">◉</span>Providers</a>
-          <a href="#attention"><span class="nav-icon">!</span>Attention queue <span class="nav-count" id="nav-issue-count">0</span></a>
-          <a href="#groups"><span class="nav-icon">⌘</span>Practices</a>
+          <a class="active" href="/"><span class="nav-icon">▦</span>Overview</a>
+          <a href="/providers/view?entity=dummy-client"><span class="nav-icon">◉</span>Providers</a>
+          <a href="/enrollment/view?entity=dummy-client"><span class="nav-icon">↔</span>Enrollment</a>
+          <a href="/expirations/view?entity=dummy-client"><span class="nav-icon">◷</span>Expirations</a>
+          <a href="/tasks/view?entity=dummy-client"><span class="nav-icon">✓</span>Tasks</a>
+          <a href="/reports/view?entity=dummy-client"><span class="nav-icon">▤</span>Reports</a>
+          <a href="/settings/view?entity=dummy-client"><span class="nav-icon">⚙</span>Settings</a>
         </nav>
         <div class="sidebar-footer">
           <div class="sandbox-pill"><span></span>Sandbox environment</div>
@@ -72,35 +75,15 @@
               <p class="eyebrow">Priority work</p>
               <h2>Attention required</h2>
             </div>
-            <a href="#providers">View provider directory <span>→</span></a>
+          <a href="/providers/view?entity=dummy-client">View provider directory <span>→</span></a>
           </div>
           <div class="attention-list" id="attention-list" aria-live="polite">
             <div class="loading-row"><span class="spinner"></span>Reviewing current provider records...</div>
           </div>
         </section>
 
-        <section class="directory-section" id="providers">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Directory</p>
-              <h2>Provider records</h2>
-            </div>
-            <div class="directory-actions">
-              <label class="search-field" for="provider-search"><span>⌕</span><input id="provider-search" type="search" placeholder="Search providers"></label>
-            </div>
-          </div>
-          <div class="provider-table-wrap">
-            <table class="provider-table">
-              <thead>
-                <tr><th>Provider</th><th>NPI</th><th>Credentials</th><th>Record health</th><th aria-label="Open record"></th></tr>
-              </thead>
-              <tbody id="provider-table-body"></tbody>
-            </table>
-          </div>
-        </section>
-
         <section class="groups-section" id="groups">
-          <p class="eyebrow">Practices</p>
+          <p class="eyebrow">Connected practices</p>
           <div class="group-list" id="group-list"></div>
         </section>
       </main>
