@@ -8,7 +8,6 @@ const elements = {
   groupCount: document.querySelector("#group-count"),
   expiringCount: document.querySelector("#expiring-count"),
   issueCount: document.querySelector("#issue-count"),
-  navIssueCount: document.querySelector("#nav-issue-count"),
   attentionList: document.querySelector("#attention-list"),
   groupList: document.querySelector("#group-list"),
   refresh: document.querySelector("#refresh-button"),
@@ -72,7 +71,6 @@ function renderMetrics() {
   elements.groupCount.textContent = state.groups.length;
   elements.expiringCount.textContent = expiring.length;
   elements.issueCount.textContent = issues.length;
-  elements.navIssueCount.textContent = issues.length;
 }
 
 function renderAttention() {
