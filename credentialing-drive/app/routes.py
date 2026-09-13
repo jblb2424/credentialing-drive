@@ -8,12 +8,15 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
 from google.cloud import firestore
 
-from app.config import SCOPES
+from app.config import EVENT_COLLECTION, SCOPES
 from app.connections import (
     create_flow, credentials_to_dict, get_connection, get_drive_service,
     get_webhook_url, update_connection,
 )
-from app.processing import process_drive_changes, process_drive_document_in_memory
+from app.processing import (
+    process_drive_changes, process_drive_document_in_memory, process_queued_drive_file,
+)
+from app.task_queue import verify_task_request
 from app.providers import (
     get_entity, get_group, get_provider, get_provider_issue, list_groups,
     list_provider_expirations, list_providers,
@@ -275,5 +278,46 @@ async def google_drive_webhook(request: Request):
     if headers.get("x-goog-resource-id") != connection.get("resource_id"):
         raise HTTPException(status_code=401, detail="Invalid Google Drive resource")
 
-    changes = process_drive_changes(get_drive_service(connection), connection)
+    changes = process_drive_changes(connection)
     return Response(status_code=204, headers={"X-Detected-Changes": str(len(changes))})
+
+
+@router.post("/tasks/process-drive-file", status_code=204)
+async def process_drive_file_task(request: Request):
+    """Cloud Tasks worker: process one queued file and retry unexpected failures."""
+    verify_task_request(request)
+    payload = await request.json()
+    file_id = payload.get("file_id")
+    if not isinstance(file_id, str) or not file_id:
+        raise HTTPException(status_code=400, detail="Cloud Tasks payload is missing file_id")
+
+    event_ref = get_firestore_client().collection(EVENT_COLLECTION).document(f"drive-{file_id}")
+    event = event_ref.get()
+    if event.exists and event.to_dict().get("status") in {"processed", "imported", "skipped"}:
+        return Response(status_code=204)
+
+    event_ref.set(
+        {
+            "status": "processing",
+            "attempt_count": firestore.Increment(1),
+            "last_attempt_at": firestore.SERVER_TIMESTAMP,
+        },
+        merge=True,
+    )
+    try:
+        result = process_queued_drive_file(get_drive_service(), file_id)
+    except HTTPException as exc:
+        if exc.status_code in {404, 413, 415}:
+            event_ref.set({"status": "skipped", "error": exc.detail}, merge=True)
+            return Response(status_code=204)
+        event_ref.set({"status": "retrying"}, merge=True)
+        raise HTTPException(status_code=500, detail="Drive file processing will be retried") from exc
+    except Exception as exc:
+        # Do not persist document contents or model output with the retry state.
+        logger.exception("Queued Drive processing failed for file_id=%s", file_id)
+        event_ref.set({"status": "retrying"}, merge=True)
+        raise HTTPException(status_code=500, detail="Drive file processing will be retried") from exc
+
+    result.pop("metadata", None)
+    event_ref.set({**result, "completed_at": firestore.SERVER_TIMESTAMP}, merge=True)
+    return Response(status_code=204)

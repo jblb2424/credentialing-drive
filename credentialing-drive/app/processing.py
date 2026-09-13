@@ -6,7 +6,10 @@ from google.api_core.exceptions import AlreadyExists
 
 from app.config import DOCUMENT_MIME_TYPES, EVENT_COLLECTION, SPREADSHEET_MIME_TYPES
 from app.connections import get_firestore_client, update_connection
-from app.drive_files import download_drive_document, download_drive_spreadsheet, parse_spreadsheet
+from app.drive_files import (
+    download_drive_document, download_drive_spreadsheet, get_drive_file_metadata,
+    parse_spreadsheet,
+)
 from app.extraction import extract_document_text
 from app.gemini import (
     classify_document_category, interpret_spreadsheet_with_gemini,
@@ -17,6 +20,7 @@ from app.providers import (
     upsert_normalized_group,
     upsert_normalized_provider,
 )
+from app.task_queue import enqueue_drive_processing_task
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +84,33 @@ def process_drive_document_in_memory(service, file_id):
     }
 
 
-def process_drive_changes(service, connection):
+def process_queued_drive_file(service, file_id):
+    """Process exactly one Drive file after Cloud Tasks dispatches its job."""
+    metadata = get_drive_file_metadata(service, file_id)
+    mime_type = metadata.get("mimeType")
+    if metadata.get("trashed") or mime_type not in DOCUMENT_MIME_TYPES | SPREADSHEET_MIME_TYPES:
+        return {"status": "skipped", "metadata": metadata}
+
+    if mime_type in SPREADSHEET_MIME_TYPES:
+        result = process_drive_spreadsheet_in_memory(service, file_id)
+        return {
+            "status": "imported",
+            "metadata": result["metadata"],
+            "source_row_count": result["source_row_count"],
+            "provider_count": result["provider_count"],
+        }
+
+    result = process_drive_document_in_memory(service, file_id)
+    return {
+        "status": "processed",
+        "metadata": result["metadata"],
+        "page_count": result["page_count"],
+        "extracted_character_count": len(result["extracted_text"]),
+        "gemini_response_character_count": len(str(result["gemini_interpretation"])),
+    }
+
+
+def process_drive_changes(connection):
     page_token = connection.get("page_token")
     folder_id = connection.get("folder_id")
     if not page_token or not folder_id:
@@ -126,58 +156,22 @@ def process_drive_changes(service, connection):
             except AlreadyExists:
                 continue
 
-            if event["mime_type"] in SPREADSHEET_MIME_TYPES:
-                try:
-                    result = process_drive_spreadsheet_in_memory(service, file_id)
-                except Exception:
-                    logger.exception("Spreadsheet import failed for Drive file_id=%s", file_id)
-                    event_ref.set({"status": "failed"}, merge=True)
-                    detected_changes.append({**event, "status": "failed"})
-                    continue
-
-                event_ref.set(
-                    {
-                        "status": "imported",
-                        "source_row_count": result["source_row_count"],
-                        "provider_count": result["provider_count"],
-                    },
-                    merge=True,
-                )
-                detected_changes.append({**event, "status": "imported"})
-                continue
-
-            if event["mime_type"] not in DOCUMENT_MIME_TYPES:
-                event_ref.set({"status": "skipped"}, merge=True)
-                detected_changes.append({**event, "status": "skipped"})
-                continue
-
             try:
-                result = process_drive_document_in_memory(service, file_id)
+                task_name = enqueue_drive_processing_task(file_id)
             except Exception:
-                # Preserve no document contents or model output in logs or Firestore.
-                logger.exception("Automatic document processing failed for Drive file_id=%s", file_id)
-                event_ref.set({"status": "failed"}, merge=True)
-                detected_changes.append({**event, "status": "failed"})
+                logger.exception("Could not enqueue Drive file_id=%s", file_id)
+                event_ref.set({"status": "enqueue_failed"}, merge=True)
+                detected_changes.append({**event, "status": "enqueue_failed"})
                 continue
 
             event_ref.set(
                 {
-                    "status": "processed",
-                    "page_count": result["page_count"],
-                    "extracted_character_count": len(result["extracted_text"]),
-                    "gemini_response_character_count": len(
-                        str(result["gemini_interpretation"])
-                    ),
+                    "status": "queued",
+                    "task_name": task_name,
                 },
                 merge=True,
             )
-            logger.info(
-                "Automatically processed Drive document file_id=%s pages=%s extracted_characters=%s",
-                file_id,
-                result["page_count"],
-                len(result["extracted_text"]),
-            )
-            detected_changes.append({**event, "status": "processed"})
+            detected_changes.append({**event, "status": "queued"})
 
         page_token = result.get("nextPageToken")
         if page_token:
