@@ -110,7 +110,7 @@ def process_queued_drive_file(service, file_id):
     }
 
 
-def process_drive_changes(connection):
+def process_drive_changes(service, connection):
     page_token = connection.get("page_token")
     folder_id = connection.get("folder_id")
     if not page_token or not folder_id:

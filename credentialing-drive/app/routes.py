@@ -278,7 +278,7 @@ async def google_drive_webhook(request: Request):
     if headers.get("x-goog-resource-id") != connection.get("resource_id"):
         raise HTTPException(status_code=401, detail="Invalid Google Drive resource")
 
-    changes = process_drive_changes(connection)
+    changes = process_drive_changes(get_drive_service(connection), connection)
     return Response(status_code=204, headers={"X-Detected-Changes": str(len(changes))})
 
 
