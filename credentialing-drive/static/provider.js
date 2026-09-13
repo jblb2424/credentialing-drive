@@ -212,10 +212,8 @@ function renderSummary(provider) {
   const affiliations = provider.affiliations || [];
   const locations = providerLocations(provider);
   const rows = [
-    ["Record ID", provider.id],
     ["Practices", affiliations.length],
     ["Locations", locations.length],
-    ["Source records", "Managed by import history"],
   ];
   elements.summary.innerHTML = rows.map(([label, summaryValue]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value(summaryValue))}</strong></div>`).join("");
 }

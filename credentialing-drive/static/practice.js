@@ -95,7 +95,6 @@ function renderPractice(group) {
   renderLocations(locations);
   renderW9(group);
   elements.summary.innerHTML = [
-    ["Practice ID", group.id],
     ["Locations", locations.length],
     ["Linked providers", group.provider_count || 0],
     ["W-9", group.w9 ? "Captured" : "Not captured"],
