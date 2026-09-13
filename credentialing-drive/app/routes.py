@@ -10,7 +10,7 @@ from google.cloud import firestore
 
 from app.config import EVENT_COLLECTION, SCOPES
 from app.connections import (
-    create_flow, credentials_to_dict, get_connection, get_drive_service,
+    create_flow, credentials_to_dict, get_connection, get_drive_service, get_firestore_client,
     get_webhook_url, update_connection,
 )
 from app.processing import (
