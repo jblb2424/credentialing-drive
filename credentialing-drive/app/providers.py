@@ -61,6 +61,28 @@ def list_groups(limit, entity_id=DEFAULT_ENTITY_ID):
     return [serialize_document(snapshot) for snapshot in snapshots]
 
 
+def get_group(group_id, entity_id=DEFAULT_ENTITY_ID):
+    entity_ref = get_entity_ref(get_firestore_client(), entity_id)
+    group_ref = entity_ref.collection(GROUP_COLLECTION).document(group_id)
+    snapshot = group_ref.get()
+    if not snapshot.exists:
+        raise HTTPException(status_code=404, detail="Practice not found")
+
+    locations = [
+        serialize_document(location_snapshot)
+        for location_snapshot in group_ref.collection(LOCATION_COLLECTION).stream()
+    ]
+    memberships = entity_ref.collection(PROVIDER_GROUP_MEMBERSHIP_COLLECTION).where(
+        "group_id", "==", group_id
+    ).stream()
+    provider_ids = [membership.to_dict().get("provider_id") for membership in memberships]
+    return {
+        **serialize_document(snapshot),
+        "locations": locations,
+        "provider_count": len([provider_id for provider_id in provider_ids if provider_id]),
+    }
+
+
 def list_providers(limit, entity_id=DEFAULT_ENTITY_ID):
     entity_ref = get_entity_ref(get_firestore_client(), entity_id)
     snapshots = entity_ref.collection(PROVIDER_COLLECTION).limit(limit).stream()
@@ -161,6 +183,28 @@ def enrich_provider_name(profile):
     return profile
 
 
+def normalize_group_data(extraction):
+    group = extraction.get("group") or {}
+    if not isinstance(group, dict):
+        group = {"legal_name": str(group)}
+
+    type_2_npi = (
+        group.get("type_2_npi") or group.get("npi") or extraction.get("type_2_npi")
+    )
+    tax_id = (
+        group.get("tax_id")
+        or group.get("tax_identification_number")
+        or extraction.get("tax_id")
+    )
+    return {
+        "legal_name": group.get("legal_name") or group.get("name") or extraction.get("group_name"),
+        "type_2_npi": str(type_2_npi) if type_2_npi else None,
+        "tax_id": str(tax_id) if tax_id else None,
+        "dba": group.get("dba") or group.get("doing_business_as") or extraction.get("dba"),
+        "w9": group.get("w9") if isinstance(group.get("w9"), dict) else None,
+    }
+
+
 def normalize_provider_data(extraction):
     provider = extraction.get("provider") or {}
     if not isinstance(provider, dict):
@@ -193,6 +237,7 @@ def normalize_provider_data(extraction):
     return {
         "entity_name": extraction.get("entity_name"),
         "group_name": extraction.get("group_name"),
+        "group": normalize_group_data(extraction),
         "provider": profile,
         "locations": as_list(extraction.get("locations")),
         "provider_locations": as_list(extraction.get("provider_locations")),
@@ -294,8 +339,9 @@ def present_fields(values):
     return {field_name: value for field_name, value in values.items() if has_value(value)}
 
 
-def resolve_group_ref(entity_ref, provider):
-    group_name = provider.get("group_name") or provider.get("entity_name")
+def resolve_group_ref(entity_ref, group):
+    group = group or {}
+    group_name = group.get("legal_name") or group.get("name")
     if not group_name:
         return None
 
@@ -309,8 +355,29 @@ def resolve_group_ref(entity_ref, provider):
         identity_ref.set({"group_id": group_id})
 
     group_ref = entity_ref.collection(GROUP_COLLECTION).document(group_id)
-    group_ref.set({"legal_name": group_name}, merge=True)
+    group_ref.set(
+        present_fields(
+            {
+                "legal_name": group_name,
+                "type_2_npi": group.get("type_2_npi"),
+                "tax_id": group.get("tax_id"),
+                "dba": group.get("dba"),
+                "w9": group.get("w9"),
+            }
+        ),
+        merge=True,
+    )
     return group_ref
+
+
+def upsert_normalized_group(normalized_data):
+    """Persist a practice even when its source document contains no provider."""
+    entity_ref = get_entity_ref(get_firestore_client())
+    group_ref = resolve_group_ref(entity_ref, normalized_data.get("group"))
+    if not group_ref:
+        return None
+    upsert_group_locations(group_ref, normalized_data.get("locations"))
+    return group_ref.id
 
 
 def upsert_group_locations(group_ref, locations):
@@ -525,7 +592,7 @@ def upsert_normalized_provider(provider, metadata, document_category="other"):
             existing.get("expiration_dates"), provider.get("expiration_dates")
         ),
     }
-    group_ref = resolve_group_ref(entity_ref, provider)
+    group_ref = resolve_group_ref(entity_ref, provider.get("group"))
     upsert_provider_group_membership(entity_ref, provider_id, group_ref, provider)
     changes = provider_changes(existing, canonical_provider)
     if not changes:

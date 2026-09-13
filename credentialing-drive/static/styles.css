@@ -96,8 +96,10 @@ h2 { font: 700 23px/1.2 "Playfair Display", serif; }
 .open-record { color: var(--pine); font-size: 18px !important; }
 .groups-section { margin-top: 39px; }
 .group-list { display: flex; flex-wrap: wrap; gap: 9px; }
-.group-chip { padding: 10px 13px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink-soft); background: var(--paper); font-size: 11px; font-weight: 700; }
+.group-chip { padding: 10px 13px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink-soft); background: var(--paper); font-size: 11px; font-weight: 700; text-decoration: none; transition: border-color .18s, box-shadow .18s, color .18s; }
 .group-chip::before { content: "⌘"; margin-right: 7px; color: var(--pine); }
+.group-chip span { margin-left: 8px; color: var(--pine); }
+.group-chip:hover { border-color: #9fb3c8; color: var(--pine); box-shadow: 0 5px 13px rgba(16,42,67,.06); }
 
 .provider-dialog { width: min(640px, calc(100vw - 32px)); max-height: min(780px, calc(100vh - 32px)); padding: 0; border: 0; border-radius: 14px; color: var(--ink); box-shadow: 0 25px 80px rgba(16,42,67,.32); }
 .provider-dialog::backdrop { background: rgba(16,42,67,.48); backdrop-filter: blur(3px); }

@@ -118,7 +118,7 @@ function renderProviders() {
 
 function renderGroups() {
   elements.groupList.innerHTML = state.groups.length
-    ? state.groups.map((group) => `<span class="group-chip">${escapeHtml(group.legal_name || group.name || "Unnamed practice")}</span>`).join("")
+    ? state.groups.map((group) => `<a class="group-chip" href="/practices/${encodeURIComponent(group.id)}/view?entity=${ENTITY_ID}">${escapeHtml(group.legal_name || group.name || "Unnamed practice")}<span aria-hidden="true">→</span></a>`).join("")
     : '<span class="group-chip">No practices detected yet</span>';
 }
 

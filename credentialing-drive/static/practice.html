@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#102a43">
+    <title>Practice Record | CredentialingHQ</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:opsz,wght@5..120,600;5..120,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <div class="record-shell">
+      <header class="record-topbar">
+        <a class="brand record-brand" href="/"><span class="brand-mark">C</span><span>Credentialing<span class="brand-accent">HQ</span></span></a>
+        <a class="back-link" href="/">← Back to overview</a>
+      </header>
+      <main class="record-content">
+        <div id="record-loading" class="record-loading"><span class="spinner"></span>Loading practice record...</div>
+        <div id="record-error" class="record-error" hidden></div>
+        <div id="record-page" hidden>
+          <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">Dashboard</a><span>/</span><span id="crumb-client">Client</span><span>/</span><strong id="crumb-practice">Practice</strong></nav>
+          <section class="record-hero">
+            <div>
+              <p class="eyebrow">Practice / group</p>
+              <h1 id="practice-name">Practice record</h1>
+              <p class="record-subtitle" id="practice-subtitle">Organization credentialing profile</p>
+            </div>
+          </section>
+          <nav class="record-nav" aria-label="Practice record sections">
+            <a href="#profile">Practice profile</a><a href="#locations">Locations</a><a href="#w9">W-9 primary source</a>
+          </nav>
+          <div class="record-grid">
+            <div class="record-main">
+              <section class="record-section" id="profile">
+                <div class="section-title"><div><p class="eyebrow">Organization</p><h2>Practice profile</h2></div><span class="section-marker">01</span></div>
+                <div class="data-grid" id="identity-grid"></div>
+              </section>
+              <section class="record-section" id="locations">
+                <div class="section-title"><div><p class="eyebrow">Care delivery</p><h2>Locations</h2></div><span class="section-marker">02</span></div>
+                <div class="location-grid" id="location-list"></div>
+              </section>
+              <section class="record-section" id="w9">
+                <div class="section-title"><div><p class="eyebrow">Primary source</p><h2>W-9 information</h2></div><span class="section-marker">03</span></div>
+                <div class="data-grid" id="w9-grid"></div>
+              </section>
+            </div>
+            <aside class="record-aside">
+              <section class="aside-card"><p class="eyebrow">At a glance</p><div class="summary-list" id="summary-list"></div></section>
+              <section class="aside-card"><p class="eyebrow">Data collection</p><h2>Practice-first model</h2><p class="issue-action">Practice identifiers and shared locations are stored once here, then linked to each provider affiliation.</p></section>
+            </aside>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script src="/static/practice.js"></script>
+  </body>
+</html>

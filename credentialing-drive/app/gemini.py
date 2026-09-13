@@ -31,8 +31,11 @@ def interpret_text_with_gemini(ocr_text):
         return {"document_type": "unknown", "summary": "No text extracted"}
 
     prompt = """You interpret healthcare credentialing documents. Return JSON only with these keys:
-document_type, entity_name, group_name, provider, locations, provider_locations, payers,
+document_type, entity_name, group_name, group, provider, locations, provider_locations, payers,
 payer_enrollments, licenses, specialties, education, liability_insurance, expiration_dates, and summary.
+`group` must be an object with legal_name, type_2_npi, tax_id, dba, and w9. When available,
+`w9` may contain legal_name, tax_id, and signed_date. Capture group-level values only when they
+are supported by the document; use null for missing values and never invent identifiers.
 `provider` must be an object with name, first_name, middle_name, last_name, provider_type,
 credentials, gender, date_of_birth, npi, caqh_id, and address.
 Each item in `locations` or `provider_locations` may contain display_name, type, address, phone,
@@ -81,6 +84,7 @@ def interpret_spreadsheet_with_gemini(rows):
 unknown column names and layouts. Return JSON only in this shape:
 {"providers": [{"source_row_numbers": [2], "document_type": "...",
 "entity_name": null, "group_name": null,
+"group": {"legal_name": null, "type_2_npi": null, "tax_id": null, "dba": null, "w9": null},
 "provider": {"name": null, "first_name": null, "middle_name": null, "last_name": null,
 "provider_type": null, "credentials": null, "gender": null, "date_of_birth": null,
 "npi": null, "caqh_id": null, "address": null},

@@ -12,7 +12,11 @@ from app.gemini import (
     classify_document_category, interpret_spreadsheet_with_gemini,
     interpret_text_with_gemini, parse_gemini_extraction,
 )
-from app.providers import normalize_provider_data, upsert_normalized_provider
+from app.providers import (
+    normalize_provider_data,
+    upsert_normalized_group,
+    upsert_normalized_provider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +26,7 @@ def save_spreadsheet_providers(metadata, providers, document_category):
     for extracted_provider in providers:
         extracted_provider.pop("source_row_numbers", None)
         normalized_provider = normalize_provider_data(extracted_provider)
+        upsert_normalized_group(normalized_provider)
         upsert_normalized_provider(normalized_provider, metadata, document_category)
 
 
@@ -47,7 +52,9 @@ def process_drive_spreadsheet_in_memory(service, file_id):
 
 def save_document_provider(metadata, extraction, document_category):
     provider = normalize_provider_data(extraction)
-    return upsert_normalized_provider(provider, metadata, document_category)
+    group_id = upsert_normalized_group(provider)
+    provider_id = upsert_normalized_provider(provider, metadata, document_category)
+    return {"group_id": group_id, "provider_id": provider_id}
 
 
 def process_drive_document_in_memory(service, file_id):

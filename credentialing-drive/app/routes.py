@@ -14,7 +14,7 @@ from app.connections import (
     get_webhook_url, update_connection,
 )
 from app.processing import process_drive_changes, process_drive_document_in_memory
-from app.providers import get_entity, get_provider, get_provider_issue, list_groups, list_providers
+from app.providers import get_entity, get_group, get_provider, get_provider_issue, list_groups, list_providers
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -28,6 +28,11 @@ def home():
 @router.get("/providers/{provider_id}/view")
 def provider_view(provider_id: str):
     return FileResponse(Path(__file__).resolve().parent.parent / "static" / "provider.html")
+
+
+@router.get("/practices/{group_id}/view")
+def practice_view(group_id: str):
+    return FileResponse(Path(__file__).resolve().parent.parent / "static" / "practice.html")
 
 
 @router.get("/providers/{provider_id}/issues/{issue_id}/view")
@@ -54,6 +59,11 @@ def get_entity_by_id(entity_id: str):
 @router.get("/entities/{entity_id}/groups")
 def get_entity_groups(entity_id: str, limit: int = Query(default=100, ge=1, le=500)):
     return {"groups": list_groups(limit, entity_id)}
+
+
+@router.get("/entities/{entity_id}/groups/{group_id}")
+def get_entity_group_by_id(entity_id: str, group_id: str):
+    return get_group(group_id, entity_id)
 
 
 @router.get("/entities/{entity_id}/providers")
