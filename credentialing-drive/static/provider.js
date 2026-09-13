@@ -56,6 +56,14 @@ function formatAddress(address) {
   return lines.join(" · ");
 }
 
+function locationLabel(location) {
+  if (typeof location === "string") return location;
+  if (!location || typeof location !== "object") return "";
+  const displayName = firstAvailable(location, ["display_name", "name", "location_name"]);
+  if (typeof displayName === "string") return displayName;
+  return formatAddress(displayName) || formatAddress(location.address) || "";
+}
+
 function providerName(provider) {
   const profile = provider.provider || {};
   return profile.name || [profile.first_name, profile.middle_name, profile.last_name].filter(Boolean).join(" ") || "Unnamed provider";
@@ -193,7 +201,7 @@ function renderPayers(provider) {
     return;
   }
   elements.payers.innerHTML = enrollments.map((enrollment) => {
-    const locations = (enrollment.locations || enrollment.location_names || []).map((location) => typeof location === "object" ? location.display_name || location.name : location).filter(Boolean).join(", ");
+    const locations = (enrollment.locations || enrollment.location_names || []).map(locationLabel).filter(Boolean).join(", ");
     return `<tr><td><strong>${escapeHtml(value(enrollment.payer_name || enrollment.name))}</strong><span class="table-note">${escapeHtml(enrollment.source || "Provider")}</span></td><td>${escapeHtml(value(enrollment.group_name || enrollment.practice_name))}</td><td>${escapeHtml(value(locations))}</td><td><span class="enrollment-status">${escapeHtml(humanize(enrollment.status || enrollment.enrollment_status || "unknown"))}</span></td></tr>`;
   }).join("");
 }
