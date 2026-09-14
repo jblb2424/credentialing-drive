@@ -245,7 +245,7 @@ def normalize_provider_data(extraction):
         )
         or None
     )
-    npi = provider.get("npi") or extraction.get("npi")
+    npi = valid_npi(provider.get("npi") or extraction.get("npi"))
     profile = enrich_provider_name({
         "name": name,
         "first_name": provider.get("first_name"),
@@ -255,7 +255,7 @@ def normalize_provider_data(extraction):
         "credentials": provider.get("credentials") or extraction.get("credentials"),
         "gender": provider.get("gender"),
         "date_of_birth": provider.get("date_of_birth") or provider.get("dob"),
-        "npi": str(npi) if npi else None,
+        "npi": npi,
         "caqh_id": provider.get("caqh_id") or provider.get("caqh"),
         "address": provider.get("address") or extraction.get("provider_address"),
     })
@@ -277,32 +277,53 @@ def normalize_provider_data(extraction):
     }
 
 
+def valid_npi(value):
+    digits = re.sub(r"\D", "", str(value or ""))
+    # Do not let placeholders such as 0000000000 become durable identity aliases.
+    return digits if len(digits) == 10 and len(set(digits)) > 1 else None
+
+
+def provider_identity_keys(provider):
+    profile = enrich_provider_name(provider.get("provider") or {})
+    keys = []
+    npi = valid_npi(profile.get("npi"))
+    caqh_id = normalized_key(profile.get("caqh_id"))
+    first_name = normalized_key(profile.get("first_name"))
+    middle_name = normalized_key(profile.get("middle_name"))
+    last_name = normalized_key(profile.get("last_name"))
+
+    if npi:
+        keys.append(f"npi-{npi}")
+    if caqh_id:
+        keys.append(f"caqh-{caqh_id}")
+    if first_name and last_name:
+        # The client is already the identity boundary. Source entity names vary by
+        # document and must not split the same clinician into separate records.
+        keys.append(f"name-{first_name}-{last_name}")
+        if middle_name:
+            keys.append(f"name-{first_name}-{middle_name}-{last_name}")
+    return keys
+
+
 def resolve_provider_id(entity_ref, provider):
-    name_key = normalized_key(provider["provider"].get("name"))
-    entity_key = normalized_key(provider.get("entity_name"))
-    npi = re.sub(r"\D", "", provider["provider"].get("npi") or "")
-    if not npi and not name_key:
+    identity_keys = provider_identity_keys(provider)
+    if not identity_keys:
         return None
 
-    identity_keys = []
-    if npi:
-        identity_keys.append(f"npi-{npi}")
-    if name_key:
-        identity_keys.append(f"name-{entity_key or 'unknown'}-{name_key}")
+    provider_ids = {
+        snapshot.to_dict()["provider_id"]
+        for identity_key in identity_keys
+        if (snapshot := entity_ref.collection(PROVIDER_IDENTITY_COLLECTION).document(identity_key).get()).exists
+    }
+    if len(provider_ids) > 1:
+        logger.warning("Ambiguous provider identity aliases: %s", identity_keys)
+        return None
 
-    for identity_key in identity_keys:
-        snapshot = entity_ref.collection(PROVIDER_IDENTITY_COLLECTION).document(identity_key).get()
-        if snapshot.exists:
-            provider_id = snapshot.to_dict()["provider_id"]
-            for alias_key in identity_keys:
-                entity_ref.collection(PROVIDER_IDENTITY_COLLECTION).document(alias_key).set(
-                    {"provider_id": provider_id}, merge=True
-                )
-            return provider_id
-
-    # Names and NPIs are aliases used to match later imports. The provider itself
-    # receives an opaque Firestore-generated ID.
-    provider_id = entity_ref.collection(PROVIDER_COLLECTION).document().id
+    # Names, NPIs, and CAQH IDs are aliases used to match later imports. The
+    # provider itself receives an opaque Firestore-generated ID.
+    provider_id = next(iter(provider_ids), None)
+    if not provider_id:
+        provider_id = entity_ref.collection(PROVIDER_COLLECTION).document().id
     for identity_key in identity_keys:
         entity_ref.collection(PROVIDER_IDENTITY_COLLECTION).document(identity_key).set(
             {"provider_id": provider_id}, merge=True
@@ -641,3 +662,131 @@ def upsert_normalized_provider(provider, metadata, document_category="other"):
         # Firestore remains the system of record if reporting is temporarily unavailable.
         logger.exception("BigQuery provider sync failed for provider_id=%s", provider_id)
     return provider_id
+
+
+def normalized_profile_name(profile):
+    profile = enrich_provider_name(profile)
+    return " ".join(
+        value for value in (
+            profile.get("first_name"), profile.get("middle_name"), profile.get("last_name")
+        ) if value
+    ) or profile.get("name")
+
+
+def ensure_compatible_provider_merge(provider_data):
+    profiles = [enrich_provider_name(data.get("provider") or {}) for data in provider_data]
+    name_keys = {
+        f"{normalized_key(profile.get('first_name'))}-{normalized_key(profile.get('last_name'))}"
+        for profile in profiles
+        if profile.get("first_name") and profile.get("last_name")
+    }
+    if len(name_keys) != 1:
+        raise HTTPException(status_code=409, detail="Providers do not share a canonical first and last name")
+
+    for field_name, normalizer in (
+        ("npi", valid_npi),
+        ("caqh_id", normalized_key),
+        ("date_of_birth", normalized_key),
+        ("middle_name", normalized_key),
+    ):
+        values = {
+            normalized
+            for profile in profiles
+            if (normalized := normalizer(profile.get(field_name)))
+        }
+        if len(values) > 1:
+            raise HTTPException(status_code=409, detail=f"Providers have conflicting {field_name} values")
+
+
+def copy_provider_subcollection(source_ref, target_ref, collection_name):
+    for snapshot in source_ref.collection(collection_name).stream():
+        target_ref.collection(collection_name).document(snapshot.id).set(
+            snapshot.to_dict() or {}, merge=True
+        )
+        snapshot.reference.delete()
+
+
+def merge_provider_memberships(entity_ref, source_provider_id, target_provider_id):
+    memberships = entity_ref.collection(PROVIDER_GROUP_MEMBERSHIP_COLLECTION).where(
+        "provider_id", "==", source_provider_id
+    ).stream()
+    for source_snapshot in memberships:
+        source_membership = source_snapshot.to_dict() or {}
+        group_id = source_membership.get("group_id")
+        if not group_id:
+            source_snapshot.reference.delete()
+            continue
+        target_ref = entity_ref.collection(PROVIDER_GROUP_MEMBERSHIP_COLLECTION).document(
+            f"{target_provider_id}-{group_id}"
+        )
+        target_membership = target_ref.get().to_dict() or {}
+        target_ref.set(
+            {
+                "provider_id": target_provider_id,
+                "group_id": group_id,
+                "provider_type": target_membership.get("provider_type") or source_membership.get("provider_type"),
+                "location_ids": merge_unique(
+                    target_membership.get("location_ids"), source_membership.get("location_ids")
+                ),
+            },
+            merge=True,
+        )
+        copy_provider_subcollection(source_snapshot.reference, target_ref, PAYER_ENROLLMENT_COLLECTION)
+        source_snapshot.reference.delete()
+
+
+def merge_duplicate_providers(target_provider_id, duplicate_provider_ids, entity_id=DEFAULT_ENTITY_ID):
+    duplicate_provider_ids = list(dict.fromkeys(duplicate_provider_ids))
+    if not duplicate_provider_ids or target_provider_id in duplicate_provider_ids:
+        raise HTTPException(status_code=400, detail="Provide one target and at least one distinct duplicate")
+
+    entity_ref = get_entity_ref(get_firestore_client(), entity_id)
+    target_ref = entity_ref.collection(PROVIDER_COLLECTION).document(target_provider_id)
+    target_snapshot = target_ref.get()
+    source_snapshots = [
+        entity_ref.collection(PROVIDER_COLLECTION).document(provider_id).get()
+        for provider_id in duplicate_provider_ids
+    ]
+    if not target_snapshot.exists or not all(snapshot.exists for snapshot in source_snapshots):
+        raise HTTPException(status_code=404, detail="One or more provider records were not found")
+
+    provider_data = [target_snapshot.to_dict() or {}] + [
+        snapshot.to_dict() or {} for snapshot in source_snapshots
+    ]
+    ensure_compatible_provider_merge(provider_data)
+
+    merged = provider_data[0]
+    for source in provider_data[1:]:
+        merged["provider"] = merge_profile(merged.get("provider") or {}, source.get("provider") or {})
+        for field_name in (
+            "provider_locations", "payer_enrollments", "licenses", "specialties",
+            "education", "liability_insurance", "expiration_dates",
+        ):
+            merged[field_name] = merge_unique(merged.get(field_name), source.get(field_name))
+
+    merged_profile = enrich_provider_name(merged.get("provider") or {})
+    merged_profile["name"] = normalized_profile_name(merged_profile)
+    merged_profile["npi"] = valid_npi(merged_profile.get("npi"))
+    merged["provider"] = merged_profile
+    target_ref.set(merged, merge=True)
+
+    for source_snapshot in source_snapshots:
+        copy_provider_subcollection(source_snapshot.reference, target_ref, "revisions")
+        copy_provider_subcollection(source_snapshot.reference, target_ref, "field_provenance")
+        merge_provider_memberships(entity_ref, source_snapshot.id, target_provider_id)
+        source_snapshot.reference.delete()
+
+    for identity_snapshot in entity_ref.collection(PROVIDER_IDENTITY_COLLECTION).stream():
+        identity = identity_snapshot.to_dict() or {}
+        if identity.get("provider_id") in duplicate_provider_ids:
+            identity_snapshot.reference.set({"provider_id": target_provider_id}, merge=True)
+    for identity_key in provider_identity_keys({"provider": merged_profile}):
+        entity_ref.collection(PROVIDER_IDENTITY_COLLECTION).document(identity_key).set(
+            {"provider_id": target_provider_id}, merge=True
+        )
+
+    try:
+        sync_provider_to_bigquery(target_provider_id, merged)
+    except Exception:
+        logger.exception("BigQuery provider sync failed after duplicate reconciliation")
+    return {"target_provider_id": target_provider_id, "merged_provider_ids": duplicate_provider_ids}

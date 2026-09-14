@@ -19,7 +19,7 @@ from app.processing import (
 from app.task_queue import verify_task_request
 from app.providers import (
     get_entity, get_group, get_provider, get_provider_issue, list_groups,
-    list_provider_expirations, list_providers,
+    list_provider_expirations, list_providers, merge_duplicate_providers,
 )
 
 router = APIRouter()
@@ -108,6 +108,24 @@ def get_entity_provider_by_id(entity_id: str, provider_id: str):
 @router.get("/entities/{entity_id}/providers/{provider_id}/issues/{issue_id}")
 def get_entity_provider_issue_by_id(entity_id: str, provider_id: str, issue_id: str):
     return get_provider_issue(provider_id, issue_id, entity_id)
+
+
+def require_internal_token(request: Request):
+    expected_token = os.environ.get("DRIVE_WATCH_RENEWAL_TOKEN", "").strip()
+    provided_token = request.headers.get("x-renewal-token", "")
+    if not expected_token or not secrets.compare_digest(provided_token, expected_token):
+        raise HTTPException(status_code=401, detail="Invalid internal token")
+
+
+@router.post("/internal/entities/{entity_id}/providers/reconcile")
+async def reconcile_duplicate_providers(entity_id: str, request: Request):
+    require_internal_token(request)
+    payload = await request.json()
+    target_provider_id = payload.get("target_provider_id")
+    duplicate_provider_ids = payload.get("duplicate_provider_ids")
+    if not isinstance(target_provider_id, str) or not isinstance(duplicate_provider_ids, list):
+        raise HTTPException(status_code=400, detail="Provide target_provider_id and duplicate_provider_ids")
+    return merge_duplicate_providers(target_provider_id, duplicate_provider_ids, entity_id)
 
 
 @router.get("/oauth/google/start")
