@@ -1,5 +1,7 @@
 from datetime import date, datetime
 
+from app.provider_types import provider_type_values_conflict
+
 EXPIRING_WINDOW_DAYS = 90
 
 
@@ -54,6 +56,10 @@ def discrepancy_issues(provider_ref):
         revision = revision_snapshot.to_dict() or {}
         for field_path, change in revision_field_changes(revision.get("changes") or {}):
             if change["current"] == change["previous"]:
+                continue
+            if field_path == "provider.provider_type" and not provider_type_values_conflict(
+                change["previous"], change["current"]
+            ):
                 continue
             severity = "critical" if field_path == "provider.npi" else "high"
             issues.append(

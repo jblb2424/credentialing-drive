@@ -17,6 +17,7 @@ from app.config import (
 )
 from app.connections import get_firestore_client, get_project_id
 from app.issues import calculate_provider_issues, expiration_records
+from app.provider_types import normalize_provider_type
 
 logger = logging.getLogger(__name__)
 
@@ -246,13 +247,19 @@ def normalize_provider_data(extraction):
         or None
     )
     npi = valid_npi(provider.get("npi") or extraction.get("npi"))
+    credentials = provider.get("credentials") or extraction.get("credentials")
     profile = enrich_provider_name({
         "name": name,
         "first_name": provider.get("first_name"),
         "middle_name": provider.get("middle_name"),
         "last_name": provider.get("last_name"),
-        "provider_type": provider.get("provider_type") or provider.get("type"),
-        "credentials": provider.get("credentials") or extraction.get("credentials"),
+        # A document may call someone a "Physician" or "Practitioner". Those
+        # are roles, not a stable credential type, so only retain a controlled
+        # designation and fall back to the document's credentials when present.
+        "provider_type": normalize_provider_type(
+            provider.get("provider_type") or provider.get("type")
+        ) or normalize_provider_type(credentials),
+        "credentials": credentials,
         "gender": provider.get("gender"),
         "date_of_birth": provider.get("date_of_birth") or provider.get("dob"),
         "npi": npi,

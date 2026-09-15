@@ -38,6 +38,11 @@ payer_enrollments, licenses, specialties, education, liability_insurance, expira
 are supported by the document; use null for missing values and never invent identifiers.
 `provider` must be an object with name, first_name, middle_name, last_name, provider_type,
 credentials, gender, date_of_birth, npi, caqh_id, and address.
+Set `provider_type` only to a specific standardized clinical designation when explicitly
+supported (for example MD, DO, NP, PA, RN, PT, OT, SLP, DDS, DMD, DPM, OD, or PharmD).
+Do not use broad role labels such as Physician, Physician and Surgeon, Practitioner,
+Individual practitioner, or Clinician as `provider_type`; use null when no specific
+designation is supported. Preserve the original designation, when relevant, in `credentials`.
 Each item in `locations` or `provider_locations` may contain display_name, type, address, phone,
 email, practice_hours, faxes, and languages. Each `licenses` item may contain type, license_number,
 issue_date, expiration_date, and state. Each `specialties` item may contain name, board_certified,
@@ -93,6 +98,9 @@ unknown column names and layouts. Return JSON only in this shape:
 "summary": null}]}
 
 Normalize every provider represented in the spreadsheet into this canonical shape.
+For `provider_type`, use only a specific standardized clinical designation such as MD, DO,
+NP, PA, RN, PT, OT, SLP, DDS, DMD, DPM, OD, or PharmD. Do not use broad role labels such as
+Physician, Practitioner, or Clinician; use null when a specific designation is unavailable.
 Use the original row numbers that support each provider in source_row_numbers. A provider
 may use multiple rows when the layout requires it. Do not infer values that are not in the
 spreadsheet, do not include a provider without a name or NPI, and use null or [] for unknown
