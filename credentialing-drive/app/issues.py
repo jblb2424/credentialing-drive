@@ -81,6 +81,47 @@ def discrepancy_issues(provider_ref):
     return issues
 
 
+def revision_source(revision):
+    file_name = revision.get("file_name")
+    if not file_name:
+        return {}
+    return {
+        "file_name": file_name,
+        "drive_file_id": revision.get("drive_file_id"),
+    }
+
+
+def revision_sort_key(snapshot):
+    recorded_at = (snapshot.to_dict() or {}).get("recorded_at")
+    return recorded_at.timestamp() if hasattr(recorded_at, "timestamp") else 0
+
+
+def latest_revision_source(provider_ref):
+    revisions = sorted(
+        provider_ref.collection("revisions").stream(), key=revision_sort_key, reverse=True
+    )
+    for snapshot in revisions:
+        source = revision_source(snapshot.to_dict() or {})
+        if source:
+            return source
+    return {}
+
+
+def expiration_source(provider_ref, candidate):
+    """Find the revision that introduced the credential behind an expiration issue."""
+    revisions = sorted(
+        provider_ref.collection("revisions").stream(), key=revision_sort_key, reverse=True
+    )
+    for snapshot in revisions:
+        revision = snapshot.to_dict() or {}
+        additions = (revision.get("changes") or {}).get(candidate["collection_name"], {}).get(
+            "added", []
+        )
+        if candidate["item"] in additions:
+            return revision_source(revision)
+    return latest_revision_source(provider_ref)
+
+
 def first_present(item, field_names):
     for field_name in field_names:
         value = item.get(field_name)
@@ -154,6 +195,8 @@ def structured_expiration_candidates(provider):
                     "expiration_date": expiration_date,
                     "field_path": f"{collection_name}[{index}].{expiration_field}",
                     "index": index,
+                    "collection_name": collection_name,
+                    "item": item,
                 }
             )
 
@@ -205,12 +248,14 @@ def expiration_candidates(provider):
                 "expiration_date": expiration_date,
                 "field_path": "expiration_dates",
                 "index": 0,
+                "collection_name": "expiration_dates",
+                "item": raw_value,
             }
         )
     return candidates
 
 
-def expiration_issue(candidate):
+def expiration_issue(candidate, source):
     record = expiration_record(candidate)
     if record["type"] == "current":
         return None
@@ -220,6 +265,7 @@ def expiration_issue(candidate):
         record.pop("severity"),
         record.pop("affected_fields"),
         **record,
+        **source,
     )
 
 
@@ -227,11 +273,16 @@ def expiration_records(provider):
     return [expiration_record(candidate) for candidate in expiration_candidates(provider)]
 
 
-def expiration_issues(provider):
-    return [issue for candidate in expiration_candidates(provider) if (issue := expiration_issue(candidate))]
+def expiration_issues(provider_ref, provider):
+    issues = []
+    for candidate in expiration_candidates(provider):
+        issue = expiration_issue(candidate, expiration_source(provider_ref, candidate))
+        if issue:
+            issues.append(issue)
+    return issues
 
 
-def missing_data_issues(provider):
+def missing_data_issues(provider_ref, provider):
     profile = provider.get("provider") or {}
     missing_fields = [
         f"provider.{field_name}"
@@ -242,7 +293,11 @@ def missing_data_issues(provider):
         return []
     return [
         build_issue(
-            "missing-critical-provider-data", "missing_data", "high", missing_fields
+            "missing-critical-provider-data",
+            "missing_data",
+            "high",
+            missing_fields,
+            **latest_revision_source(provider_ref),
         )
     ]
 
@@ -250,6 +305,6 @@ def missing_data_issues(provider):
 def calculate_provider_issues(provider_ref, provider):
     return (
         discrepancy_issues(provider_ref)
-        + expiration_issues(provider)
-        + missing_data_issues(provider)
+        + expiration_issues(provider_ref, provider)
+        + missing_data_issues(provider_ref, provider)
     )

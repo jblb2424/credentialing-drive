@@ -71,7 +71,7 @@ function detailRows(issue) {
     ["Previous value", issue.previous_value],
     ["Previous source file", issue.previous_file_name],
     ["Current value", issue.current_value],
-    ["Current source file", issue.file_name],
+    ["Source file", issue.file_name],
     ["Drive file ID", issue.drive_file_id],
     ["Revision ID", issue.revision_id],
   ].filter(([, value]) => value !== undefined && value !== null && value !== "");
