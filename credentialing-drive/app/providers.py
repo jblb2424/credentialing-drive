@@ -577,7 +577,7 @@ def provider_changes(existing, updated):
     return changes
 
 
-def record_provider_revision(provider_ref, metadata, changes, document_category):
+def record_provider_revision(provider_ref, metadata, changes, document_category, previous_files):
     revision = {
         "drive_file_id": metadata["id"],
         "file_name": metadata.get("name"),
@@ -585,6 +585,10 @@ def record_provider_revision(provider_ref, metadata, changes, document_category)
         "changes": changes,
         "recorded_at": firestore.SERVER_TIMESTAMP,
     }
+    if previous_files:
+        # A revision can update multiple fields whose previous values came from
+        # different uploads, so retain lineage by field path.
+        revision["previous_files"] = previous_files
     provider_ref.collection("revisions").document(f"drive-{metadata['id']}").set(
         revision,
         merge=True,
@@ -599,13 +603,35 @@ def scalar_field_changes(changes):
 
 def source_metadata(metadata):
     return {
-        "file_name": metadata.get("name"),
-        "drive_file_id": metadata["id"],
+        "file_name": metadata.get("name") or metadata.get("file_name"),
+        "drive_file_id": metadata.get("id") or metadata.get("drive_file_id"),
     }
 
 
 def field_provenance_id(field_path):
     return hashlib.sha256(field_path.encode("utf-8")).hexdigest()
+
+
+def previous_file_sources(provider_ref, changes):
+    """Look up the source file for every scalar value this import replaces."""
+    previous_files = {}
+    for field_path, change in scalar_field_changes(changes):
+        if "previous" not in change:
+            continue
+        provenance = provider_ref.collection("field_provenance").document(
+            field_provenance_id(field_path)
+        ).get()
+        if not provenance.exists:
+            continue
+        provenance_data = provenance.to_dict() or {}
+        # Do not attach an inaccurate file if provenance became stale.
+        if provenance_data.get("value") != change["previous"]:
+            logger.warning("No matching provenance for replaced field %s", field_path)
+            continue
+        source = provenance_data.get("source")
+        if isinstance(source, dict) and source.get("file_name"):
+            previous_files[field_path] = source
+    return previous_files
 
 
 def record_field_provenance(provider_ref, metadata, changes):
@@ -622,6 +648,48 @@ def record_field_provenance(provider_ref, metadata, changes):
             },
             merge=True,
         )
+
+
+def revision_sort_key(snapshot):
+    recorded_at = (snapshot.to_dict() or {}).get("recorded_at")
+    if hasattr(recorded_at, "timestamp"):
+        return (recorded_at.timestamp(), snapshot.id)
+    return (0, snapshot.id)
+
+
+def backfill_revision_previous_files(entity_id=DEFAULT_ENTITY_ID):
+    """Reconstruct prior-file lineage from ordered revision history where possible."""
+    entity_ref = get_entity_ref(get_firestore_client(), entity_id)
+    revised_count = 0
+    source_count = 0
+
+    for provider_snapshot in entity_ref.collection(PROVIDER_COLLECTION).stream():
+        known_values = {}
+        revisions = sorted(
+            provider_snapshot.reference.collection("revisions").stream(),
+            key=revision_sort_key,
+        )
+        for revision_snapshot in revisions:
+            revision = revision_snapshot.to_dict() or {}
+            derived_sources = {}
+            for field_path, change in scalar_field_changes(revision.get("changes") or {}):
+                previous = known_values.get(field_path)
+                if "previous" in change and previous and previous["value"] == change["previous"]:
+                    derived_sources[field_path] = previous["source"]
+                known_values[field_path] = {
+                    "value": change["current"],
+                    "source": source_metadata(revision),
+                }
+
+            if not derived_sources:
+                continue
+            # Preserve any lineage already recorded during normal ingestion.
+            previous_files = {**derived_sources, **(revision.get("previous_files") or {})}
+            revision_snapshot.reference.set({"previous_files": previous_files}, merge=True)
+            revised_count += 1
+            source_count += len(derived_sources)
+
+    return {"revisions_updated": revised_count, "previous_files_added": source_count}
 
 
 def upsert_normalized_provider(provider, metadata, document_category="other"):
@@ -660,8 +728,11 @@ def upsert_normalized_provider(provider, metadata, document_category="other"):
     if not changes:
         return provider_id
 
+    previous_files = previous_file_sources(provider_ref, changes)
     provider_ref.set(canonical_provider, merge=True)
-    record_provider_revision(provider_ref, metadata, changes, document_category)
+    record_provider_revision(
+        provider_ref, metadata, changes, document_category, previous_files
+    )
     record_field_provenance(provider_ref, metadata, changes)
     try:
         sync_provider_to_bigquery(provider_id, canonical_provider)

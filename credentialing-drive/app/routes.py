@@ -20,6 +20,7 @@ from app.task_queue import verify_task_request
 from app.providers import (
     get_entity, get_group, get_provider, get_provider_issue, list_groups,
     list_provider_expirations, list_providers, merge_duplicate_providers,
+    backfill_revision_previous_files,
 )
 
 router = APIRouter()
@@ -126,6 +127,12 @@ async def reconcile_duplicate_providers(entity_id: str, request: Request):
     if not isinstance(target_provider_id, str) or not isinstance(duplicate_provider_ids, list):
         raise HTTPException(status_code=400, detail="Provide target_provider_id and duplicate_provider_ids")
     return merge_duplicate_providers(target_provider_id, duplicate_provider_ids, entity_id)
+
+
+@router.post("/internal/entities/{entity_id}/revisions/backfill-previous-files")
+def backfill_previous_revision_files(entity_id: str, request: Request):
+    require_internal_token(request)
+    return backfill_revision_previous_files(entity_id)
 
 
 @router.get("/oauth/google/start")

@@ -69,8 +69,9 @@ function detailRows(issue) {
     ["Days until expiration", issue.days_until_expiration],
     ["Days past expiration", issue.days_past_expiration],
     ["Previous value", issue.previous_value],
+    ["Previous source file", issue.previous_file_name],
     ["Current value", issue.current_value],
-    ["Source file", issue.file_name],
+    ["Current source file", issue.file_name],
     ["Drive file ID", issue.drive_file_id],
     ["Revision ID", issue.revision_id],
   ].filter(([, value]) => value !== undefined && value !== null && value !== "");

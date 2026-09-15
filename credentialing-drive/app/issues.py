@@ -62,6 +62,7 @@ def discrepancy_issues(provider_ref):
             ):
                 continue
             severity = "critical" if field_path == "provider.npi" else "high"
+            previous_file = (revision.get("previous_files") or {}).get(field_path) or {}
             issues.append(
                 build_issue(
                     f"discrepancy-{revision_snapshot.id}-{field_path}",
@@ -73,6 +74,8 @@ def discrepancy_issues(provider_ref):
                     revision_id=revision_snapshot.id,
                     file_name=revision.get("file_name"),
                     drive_file_id=revision.get("drive_file_id"),
+                    previous_file_name=previous_file.get("file_name"),
+                    previous_drive_file_id=previous_file.get("drive_file_id"),
                 )
             )
     return issues
