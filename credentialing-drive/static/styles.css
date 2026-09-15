@@ -197,6 +197,15 @@ h2 { font: 700 23px/1.2 "Playfair Display", serif; }
 .coverage-row { display: flex; justify-content: space-between; gap: 13px; margin-top: 10px; color: #829ab1; font-size: 10px; }
 .coverage-row strong { color: var(--ink-soft); font-weight: 700; text-align: right; }
 .enrollment-status { display: inline-block; padding: 5px 7px; border-radius: 99px; color: var(--pine); background: var(--mint); font: 500 9px/1 "DM Mono", monospace; }
+.payer-table { table-layout: fixed; }
+.payer-table th:nth-child(1) { width: 18%; }
+.payer-table th:nth-child(2) { width: 26%; }
+.payer-table th:nth-child(3) { width: 31%; }
+.payer-table th:nth-child(4) { width: 25%; }
+.payer-table td { vertical-align: middle; }
+.payer-name strong, .payer-name .table-note { display: block; }
+.payer-name .table-note { margin-top: 6px; }
+.payer-status .enrollment-status { max-width: 100%; padding: 7px 12px; line-height: 1.25; white-space: normal; }
 .record-aside { position: sticky; top: 20px; display: grid; gap: 15px; }
 .aside-card { padding: 21px; }
 .aside-card h2 { margin-top: 0; }

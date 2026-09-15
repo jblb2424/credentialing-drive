@@ -202,7 +202,7 @@ function renderPayers(provider) {
   }
   elements.payers.innerHTML = enrollments.map((enrollment) => {
     const locations = (enrollment.locations || enrollment.location_names || []).map(locationLabel).filter(Boolean).join(", ");
-    return `<tr><td><strong>${escapeHtml(value(enrollment.payer_name || enrollment.name))}</strong><span class="table-note">${escapeHtml(enrollment.source || "Provider")}</span></td><td>${escapeHtml(value(enrollment.group_name || enrollment.practice_name))}</td><td>${escapeHtml(value(locations))}</td><td><span class="enrollment-status">${escapeHtml(humanize(enrollment.status || enrollment.enrollment_status || "unknown"))}</span></td></tr>`;
+    return `<tr><td class="payer-name"><strong>${escapeHtml(value(enrollment.payer_name || enrollment.name))}</strong><span class="table-note">${escapeHtml(enrollment.source || "Provider")}</span></td><td>${escapeHtml(value(enrollment.group_name || enrollment.practice_name))}</td><td>${escapeHtml(value(locations))}</td><td class="payer-status"><span class="enrollment-status">${escapeHtml(humanize(enrollment.status || enrollment.enrollment_status || "unknown"))}</span></td></tr>`;
   }).join("");
 }
 
