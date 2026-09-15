@@ -62,7 +62,6 @@ function nextAction(issue) {
 
 function detailRows(issue) {
   const entries = [
-    ["Affected fields", (issue.affected_fields || []).map(humanize).join(", ")],
     ["Credential", issue.credential_label],
     ["Credential category", humanize(issue.credential_category)],
     ["Credential identifier", issue.credential_identifier],
