@@ -46,16 +46,16 @@
         </section>
 
         <section class="metrics" aria-label="Credentialing summary">
-          <article class="metric-card">
+          <a class="metric-card metric-link" href="/practices/view?entity=dummy-client">
             <p>Practices</p>
             <strong id="group-count">--</strong>
-            <span>Connected to this client</span>
-          </article>
-          <article class="metric-card metric-primary">
+            <span>Browse all practices <b>→</b></span>
+          </a>
+          <a class="metric-card metric-link metric-primary" href="/providers/view?entity=dummy-client">
             <p>Provider records</p>
             <strong id="provider-count">--</strong>
             <span id="provider-support">Loading provider directory</span>
-          </article>
+          </a>
           <a class="metric-card metric-link metric-issue" href="/issues/view?entity=dummy-client">
             <p>Open issues</p>
             <strong id="issue-count">--</strong>
@@ -89,6 +89,6 @@
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="/static/dashboard.js?v=20260917a"></script>
+    <script src="/static/dashboard.js?v=20260917b"></script>
   </body>
 </html>

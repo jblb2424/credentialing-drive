@@ -67,7 +67,9 @@ function renderMetrics() {
   const issues = allIssues();
   const expiring = issues.filter(({ issue }) => issue.type === "expiring");
   elements.providerCount.textContent = state.providers.length;
-  elements.providerSupport.textContent = state.providers.length === 1 ? "1 active provider record" : "Active provider records";
+  elements.providerSupport.textContent = state.providers.length === 1
+    ? "1 active provider record"
+    : "Browse all provider records";
   elements.groupCount.textContent = state.groups.length;
   elements.expiringCount.textContent = expiring.length;
   elements.issueCount.textContent = issues.length;
