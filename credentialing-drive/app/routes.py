@@ -52,6 +52,11 @@ def expirations_view():
     return FileResponse(Path(__file__).resolve().parent.parent / "static" / "expirations.html")
 
 
+@router.get("/issues/view")
+def issues_view():
+    return FileResponse(Path(__file__).resolve().parent.parent / "static" / "issues.html")
+
+
 @router.get("/enrollment/view")
 @router.get("/tasks/view")
 @router.get("/reports/view")

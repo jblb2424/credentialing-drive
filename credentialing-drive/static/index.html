@@ -46,26 +46,26 @@
         </section>
 
         <section class="metrics" aria-label="Credentialing summary">
-          <article class="metric-card metric-primary">
-            <p>Provider records</p>
-            <strong id="provider-count">--</strong>
-            <span id="provider-support">Loading provider directory</span>
-          </article>
-          <article class="metric-card metric-warning">
-            <p>Credentials expiring soon</p>
-            <strong id="expiring-count">--</strong>
-            <span>Within the next 90 days</span>
-          </article>
-          <article class="metric-card metric-issue">
-            <p>Open issues</p>
-            <strong id="issue-count">--</strong>
-            <span>Need review or completion</span>
-          </article>
           <article class="metric-card">
             <p>Practices</p>
             <strong id="group-count">--</strong>
             <span>Connected to this client</span>
           </article>
+          <article class="metric-card metric-primary">
+            <p>Provider records</p>
+            <strong id="provider-count">--</strong>
+            <span id="provider-support">Loading provider directory</span>
+          </article>
+          <a class="metric-card metric-link metric-issue" href="/issues/view?entity=dummy-client">
+            <p>Open issues</p>
+            <strong id="issue-count">--</strong>
+            <span>Review all outstanding issues <b>→</b></span>
+          </a>
+          <a class="metric-card metric-link metric-warning" href="/expirations/view?entity=dummy-client&amp;status=expiring">
+            <p>Credentials expiring soon</p>
+            <strong id="expiring-count">--</strong>
+            <span>Within the next 90 days <b>→</b></span>
+          </a>
         </section>
 
         <section class="attention-panel" id="attention">
@@ -89,6 +89,6 @@
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="/static/dashboard.js"></script>
+    <script src="/static/dashboard.js?v=20260917a"></script>
   </body>
 </html>

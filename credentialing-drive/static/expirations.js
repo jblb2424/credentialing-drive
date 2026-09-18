@@ -1,6 +1,9 @@
 const params = new URLSearchParams(window.location.search);
 const entityId = params.get("entity") || "dummy-client";
+const statusFilter = params.get("status");
 const countElement = document.querySelector("#expiration-count");
+const labelElement = document.querySelector("#expiration-label");
+const eyebrowElement = document.querySelector("#expiration-eyebrow");
 const tableElement = document.querySelector("#expiration-table-body");
 
 function escapeHtml(value) {
@@ -22,6 +25,11 @@ function statusLabel(record) {
 }
 
 function render(records) {
+  if (statusFilter === "expiring") {
+    records = records.filter((record) => record.type === "expiring");
+    eyebrowElement.textContent = "Next 90 days";
+    labelElement.textContent = "credentials expiring soon";
+  }
   countElement.textContent = records.length;
   if (!records.length) {
     tableElement.innerHTML = '<tr><td colspan="5" class="record-table-empty">No credential expiration dates have been captured yet.</td></tr>';

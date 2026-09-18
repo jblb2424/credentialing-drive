@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#102a43">
-    <title>Expirations | CredentialingHQ</title>
+    <title>Open Issues | CredentialingHQ</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:opsz,wght@5..120,600;5..120,700&display=swap" rel="stylesheet">
@@ -19,7 +19,7 @@
           <a href="/"><span class="nav-icon">▦</span>Overview</a>
           <a href="/providers/view?entity=dummy-client"><span class="nav-icon">◉</span>Providers</a>
           <a href="/enrollment/view?entity=dummy-client"><span class="nav-icon">↔</span>Enrollment</a>
-          <a class="active" href="/expirations/view?entity=dummy-client"><span class="nav-icon">◷</span>Expirations</a>
+          <a href="/expirations/view?entity=dummy-client"><span class="nav-icon">◷</span>Expirations</a>
           <a href="/tasks/view?entity=dummy-client"><span class="nav-icon">✓</span>Tasks</a>
           <a href="/reports/view?entity=dummy-client"><span class="nav-icon">▤</span>Reports</a>
           <a href="/settings/view?entity=dummy-client"><span class="nav-icon">⚙</span>Settings</a>
@@ -28,13 +28,13 @@
       </aside>
       <main class="workspace-content">
         <header class="topbar"><div class="mobile-brand">Credentialing<span>HQ</span></div><div class="status-line"><span class="live-dot"></span>Live data</div></header>
-        <section class="workspace-hero"><p class="eyebrow">Credential lifecycle</p><h1>Expirations</h1><p class="lede">Every captured credential expiration across this client, with expired records first and upcoming dates in order.</p></section>
+        <section class="workspace-hero"><p class="eyebrow">Credentialing operations</p><h1>Open issues</h1><p class="lede">Every outstanding discrepancy, missing field, and expiration that needs follow-up for this client.</p></section>
         <section class="workspace-panel">
-          <div class="section-heading"><div><p class="eyebrow" id="expiration-eyebrow">All captured dates</p><h2><span id="expiration-count">--</span> <span id="expiration-label">expiration records</span></h2></div></div>
-          <div class="provider-table-wrap"><table class="provider-table expiration-table"><thead><tr><th>Credential</th><th>Provider</th><th>Expiration date</th><th>Status</th><th aria-label="Open provider"></th></tr></thead><tbody id="expiration-table-body"><tr><td colspan="5" class="record-table-empty">Loading expiration records...</td></tr></tbody></table></div>
+          <div class="section-heading"><div><p class="eyebrow">Needs attention</p><h2><span id="issue-count">--</span> open issues</h2></div></div>
+          <div class="provider-table-wrap"><table class="provider-table"><thead><tr><th>Issue</th><th>Provider</th><th>Severity</th><th>Source file</th><th aria-label="Open issue"></th></tr></thead><tbody id="issue-table-body"><tr><td colspan="5" class="record-table-empty">Loading open issues...</td></tr></tbody></table></div>
         </section>
       </main>
     </div>
-    <script src="/static/expirations.js?v=20260917a"></script>
+    <script src="/static/issues.js?v=20260917a"></script>
   </body>
 </html>
