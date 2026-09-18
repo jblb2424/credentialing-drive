@@ -1,6 +1,7 @@
 from datetime import date, datetime
 
 from app.provider_types import provider_type_values_conflict
+from app.provider_names import name_values_equivalent
 
 EXPIRING_WINDOW_DAYS = 90
 
@@ -58,6 +59,10 @@ def discrepancy_issues(provider_ref):
             if change["current"] == change["previous"]:
                 continue
             if field_path == "provider.provider_type" and not provider_type_values_conflict(
+                change["previous"], change["current"]
+            ):
+                continue
+            if field_path == "provider.name" and name_values_equivalent(
                 change["previous"], change["current"]
             ):
                 continue

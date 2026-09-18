@@ -17,6 +17,9 @@ from app.config import (
 )
 from app.connections import get_firestore_client, get_project_id
 from app.issues import calculate_provider_issues, expiration_records
+from app.provider_names import (
+    enrich_provider_name, name_values_equivalent, split_provider_name_and_credentials,
+)
 from app.provider_types import normalize_provider_type
 
 logger = logging.getLogger(__name__)
@@ -177,38 +180,6 @@ def normalized_key(value):
     return re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-")
 
 
-def name_parts(name):
-    """Parse conventional credentialing name formats without guessing ambiguous names."""
-    if not isinstance(name, str) or not name.strip():
-        return {}
-    normalized_name = name.strip()
-    if "," in normalized_name:
-        last_name, given_names = (part.strip() for part in normalized_name.split(",", 1))
-        parts = given_names.split()
-        return {
-            "first_name": parts[0] if parts else None,
-            "middle_name": " ".join(parts[1:]) or None,
-            "last_name": last_name or None,
-        }
-    parts = normalized_name.split()
-    if len(parts) >= 2:
-        return {
-            "first_name": parts[0],
-            "middle_name": " ".join(parts[1:-1]) or None,
-            "last_name": parts[-1],
-        }
-    return {}
-
-
-def enrich_provider_name(profile):
-    profile = dict(profile or {})
-    parsed_parts = name_parts(profile.get("name"))
-    for field_name, parsed_value in parsed_parts.items():
-        if not profile.get(field_name) and parsed_value:
-            profile[field_name] = parsed_value
-    return profile
-
-
 def normalize_group_data(extraction):
     group = extraction.get("group") or {}
     if not isinstance(group, dict):
@@ -246,8 +217,9 @@ def normalize_provider_data(extraction):
         )
         or None
     )
+    name, name_credentials = split_provider_name_and_credentials(name)
     npi = valid_npi(provider.get("npi") or extraction.get("npi"))
-    credentials = provider.get("credentials") or extraction.get("credentials")
+    credentials = provider.get("credentials") or extraction.get("credentials") or name_credentials
     profile = enrich_provider_name({
         "name": name,
         "first_name": provider.get("first_name"),
@@ -553,6 +525,8 @@ def provider_changes(existing, updated):
         previous_value = existing_profile.get(field_name)
         current_value = updated_profile.get(field_name)
         if not has_value(current_value) or previous_value == current_value:
+            continue
+        if field_name == "name" and name_values_equivalent(previous_value, current_value):
             continue
         profile_changes[field_name] = {"current": current_value}
         if previous_value is not None:
