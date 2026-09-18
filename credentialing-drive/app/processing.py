@@ -4,7 +4,10 @@ import logging
 from fastapi import HTTPException
 from google.api_core.exceptions import AlreadyExists
 
-from app.config import DOCUMENT_MIME_TYPES, EVENT_COLLECTION, SPREADSHEET_MIME_TYPES
+from app.config import (
+    DOCUMENT_MIME_TYPES, EVENT_COLLECTION, SPREADSHEET_MIME_TYPES,
+    allow_duplicate_drive_imports,
+)
 from app.connections import get_firestore_client, update_connection
 from app.drive_files import (
     download_drive_document, download_drive_spreadsheet, get_drive_file_metadata,
@@ -117,6 +120,7 @@ def process_drive_changes(service, connection):
         raise HTTPException(status_code=409, detail="Drive watch is not configured")
 
     client = get_firestore_client()
+    allow_duplicates = allow_duplicate_drive_imports()
     detected_changes = []
 
     while page_token:
@@ -149,15 +153,18 @@ def process_drive_changes(service, connection):
                 "change_type": change.get("changeType"),
                 "status": "detected",
             }
-            # Use the Drive file ID as an idempotency key across overlapping watch channels.
             event_ref = client.collection(EVENT_COLLECTION).document(f"drive-{file_id}")
-            try:
-                event_ref.create(event)
-            except AlreadyExists:
-                continue
+            if allow_duplicates:
+                event_ref.set(event, merge=True)
+            else:
+                # Use the Drive file ID as an idempotency key across overlapping watch channels.
+                try:
+                    event_ref.create(event)
+                except AlreadyExists:
+                    continue
 
             try:
-                task_name = enqueue_drive_processing_task(file_id)
+                task_name = enqueue_drive_processing_task(file_id, allow_duplicates)
             except Exception:
                 logger.exception("Could not enqueue Drive file_id=%s", file_id)
                 event_ref.set({"status": "enqueue_failed"}, merge=True)

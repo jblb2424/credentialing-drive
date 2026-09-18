@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
 from google.cloud import firestore
 
-from app.config import EVENT_COLLECTION, SCOPES
+from app.config import EVENT_COLLECTION, SCOPES, allow_duplicate_drive_imports
 from app.connections import (
     create_flow, credentials_to_dict, get_connection, get_drive_service, get_firestore_client,
     get_webhook_url, update_connection,
@@ -18,7 +18,7 @@ from app.processing import (
 )
 from app.task_queue import verify_task_request
 from app.providers import (
-    get_entity, get_group, get_provider, get_provider_issue, list_groups,
+    delete_provider, get_entity, get_group, get_provider, get_provider_issue, list_groups,
     list_provider_expirations, list_providers, merge_duplicate_providers,
     backfill_revision_previous_files,
 )
@@ -127,6 +127,12 @@ async def reconcile_duplicate_providers(entity_id: str, request: Request):
     if not isinstance(target_provider_id, str) or not isinstance(duplicate_provider_ids, list):
         raise HTTPException(status_code=400, detail="Provide target_provider_id and duplicate_provider_ids")
     return merge_duplicate_providers(target_provider_id, duplicate_provider_ids, entity_id)
+
+
+@router.delete("/internal/entities/{entity_id}/providers/{provider_id}")
+def delete_internal_provider(entity_id: str, provider_id: str, request: Request):
+    require_internal_token(request)
+    return delete_provider(provider_id, entity_id)
 
 
 @router.post("/internal/entities/{entity_id}/revisions/backfill-previous-files")
@@ -318,7 +324,11 @@ async def process_drive_file_task(request: Request):
 
     event_ref = get_firestore_client().collection(EVENT_COLLECTION).document(f"drive-{file_id}")
     event = event_ref.get()
-    if event.exists and event.to_dict().get("status") in {"processed", "imported", "skipped"}:
+    if (
+        not allow_duplicate_drive_imports()
+        and event.exists
+        and event.to_dict().get("status") in {"processed", "imported", "skipped"}
+    ):
         return Response(status_code=204)
 
     event_ref.set(

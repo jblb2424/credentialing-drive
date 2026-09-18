@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import uuid
 
 from fastapi import HTTPException, Request
 from google.auth.transport.requests import Request as GoogleAuthRequest
@@ -39,15 +40,16 @@ def queue_path(client=None):
     )
 
 
-def task_id_for_file(file_id):
+def task_id_for_file(file_id, allow_duplicate=False):
     # Cloud Tasks task IDs are restrictive; hash Drive's opaque file ID for safe idempotency.
-    return f"drive-{hashlib.sha256(file_id.encode()).hexdigest()[:40]}"
+    task_id = f"drive-{hashlib.sha256(file_id.encode()).hexdigest()[:40]}"
+    return f"{task_id}-{uuid.uuid4().hex[:8]}" if allow_duplicate else task_id
 
 
-def enqueue_drive_processing_task(file_id):
+def enqueue_drive_processing_task(file_id, allow_duplicate=False):
     client = tasks_v2.CloudTasksClient()
     parent = queue_path(client)
-    task_name = f"{parent}/tasks/{task_id_for_file(file_id)}"
+    task_name = f"{parent}/tasks/{task_id_for_file(file_id, allow_duplicate)}"
     target_url = get_task_processor_url()
     task = {
         "name": task_name,

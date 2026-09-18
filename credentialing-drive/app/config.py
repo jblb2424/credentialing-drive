@@ -1,3 +1,6 @@
+import os
+
+
 SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly",
     "openid",
@@ -53,3 +56,8 @@ DOCUMENT_CATEGORIES = (
     "peer_references", "w_9", "irs_letter", "articles_of_organization",
     "bank_letter_or_voided_check", "other",
 )
+
+
+def allow_duplicate_drive_imports():
+    """Temporary replay switch for controlled ingestion testing."""
+    return os.environ.get("ALLOW_DUPLICATE_DRIVE_IMPORTS", "false").lower() == "true"

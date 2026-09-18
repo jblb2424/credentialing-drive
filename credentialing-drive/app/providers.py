@@ -868,3 +868,29 @@ def merge_duplicate_providers(target_provider_id, duplicate_provider_ids, entity
     except Exception:
         logger.exception("BigQuery provider sync failed after duplicate reconciliation")
     return {"target_provider_id": target_provider_id, "merged_provider_ids": duplicate_provider_ids}
+
+
+def delete_document_tree(document_ref):
+    for collection in document_ref.collections():
+        for snapshot in collection.stream():
+            delete_document_tree(snapshot.reference)
+    document_ref.delete()
+
+
+def delete_provider(provider_id, entity_id=DEFAULT_ENTITY_ID):
+    """Remove a provider and every provider-scoped record for a clean re-import."""
+    entity_ref = get_entity_ref(get_firestore_client(), entity_id)
+    provider_ref = entity_ref.collection(PROVIDER_COLLECTION).document(provider_id)
+    if not provider_ref.get().exists:
+        raise HTTPException(status_code=404, detail="Provider not found")
+
+    for membership in entity_ref.collection(PROVIDER_GROUP_MEMBERSHIP_COLLECTION).where(
+        "provider_id", "==", provider_id
+    ).stream():
+        delete_document_tree(membership.reference)
+    for identity in entity_ref.collection(PROVIDER_IDENTITY_COLLECTION).where(
+        "provider_id", "==", provider_id
+    ).stream():
+        identity.reference.delete()
+    delete_document_tree(provider_ref)
+    return {"deleted_provider_id": provider_id}
