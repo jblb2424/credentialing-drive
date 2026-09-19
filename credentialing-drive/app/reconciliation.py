@@ -47,6 +47,64 @@ def source_supports_value(value, source_records):
     return any(json_equal(record, value) for record in source_records)
 
 
+def validate_category_reconciliation(category, source_records, groups):
+    """Validate one category so an invalid choice cannot block another category."""
+    if not isinstance(groups, list) or not groups:
+        raise ValueError(f"Reconciliation model omitted decisions for {category}")
+
+    seen_indices = set()
+    canonical_records = []
+    category_summary = []
+    for group in groups:
+        if not isinstance(group, dict):
+            raise ValueError(f"Reconciliation model returned invalid {category} group")
+        source_indices = group.get("source_record_indices")
+        if (
+            not isinstance(source_indices, list)
+            or not source_indices
+            or any(not isinstance(index, int) for index in source_indices)
+            or len(set(source_indices)) != len(source_indices)
+            or any(index < 0 or index >= len(source_records) for index in source_indices)
+            or seen_indices.intersection(source_indices)
+        ):
+            raise ValueError(f"Reconciliation model returned invalid source indices for {category}")
+        seen_indices.update(source_indices)
+
+        decision = group.get("decision")
+        if decision not in VALID_DECISIONS:
+            raise ValueError(f"Reconciliation model returned invalid decision for {category}")
+        cited_records = [source_records[index] for index in source_indices]
+        confidence = group.get("confidence")
+        if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
+            raise ValueError(f"Reconciliation model returned invalid confidence for {category}")
+
+        if decision == "needs_review":
+            canonical_records.extend(cited_records)
+        else:
+            canonical_record = group.get("canonical_record")
+            if not source_supports_value(canonical_record, cited_records):
+                raise ValueError(f"Reconciliation model introduced unsupported {category} data")
+            canonical_records.append(canonical_record)
+
+        category_summary.append(
+            {
+                "source_record_indices": source_indices,
+                "decision": decision,
+                "confidence": float(confidence),
+                "reason": str(group.get("reason") or "")[:500],
+            }
+        )
+
+    if seen_indices != set(range(len(source_records))):
+        raise ValueError(f"Reconciliation model did not account for every {category} record")
+    return canonical_records, {
+        "category": category,
+        "before_count": len(source_records),
+        "after_count": len(canonical_records),
+        "decisions": category_summary,
+    }
+
+
 def validate_reconciliation(candidates, response):
     """Validate model decisions before any provider record is modified."""
     categories = response.get("categories") if isinstance(response, dict) else None
@@ -55,66 +113,18 @@ def validate_reconciliation(candidates, response):
 
     reconciled = {}
     summaries = []
+    skipped_categories = []
     for category, source_records in candidates.items():
-        groups = categories.get(category)
-        if not isinstance(groups, list) or not groups:
-            raise ValueError(f"Reconciliation model omitted decisions for {category}")
-
-        seen_indices = set()
-        canonical_records = []
-        category_summary = []
-        for group in groups:
-            if not isinstance(group, dict):
-                raise ValueError(f"Reconciliation model returned invalid {category} group")
-            source_indices = group.get("source_record_indices")
-            if (
-                not isinstance(source_indices, list)
-                or not source_indices
-                or any(not isinstance(index, int) for index in source_indices)
-                or len(set(source_indices)) != len(source_indices)
-                or any(index < 0 or index >= len(source_records) for index in source_indices)
-                or seen_indices.intersection(source_indices)
-            ):
-                raise ValueError(f"Reconciliation model returned invalid source indices for {category}")
-            seen_indices.update(source_indices)
-
-            decision = group.get("decision")
-            if decision not in VALID_DECISIONS:
-                raise ValueError(f"Reconciliation model returned invalid decision for {category}")
-            cited_records = [source_records[index] for index in source_indices]
-            confidence = group.get("confidence")
-            if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
-                raise ValueError(f"Reconciliation model returned invalid confidence for {category}")
-
-            if decision == "needs_review":
-                canonical_records.extend(cited_records)
-            else:
-                canonical_record = group.get("canonical_record")
-                if not source_supports_value(canonical_record, cited_records):
-                    raise ValueError(f"Reconciliation model introduced unsupported {category} data")
-                canonical_records.append(canonical_record)
-
-            category_summary.append(
-                {
-                    "source_record_indices": source_indices,
-                    "decision": decision,
-                    "confidence": float(confidence),
-                    "reason": str(group.get("reason") or "")[:500],
-                }
+        try:
+            canonical_records, summary = validate_category_reconciliation(
+                category, source_records, categories.get(category)
             )
-
-        if seen_indices != set(range(len(source_records))):
-            raise ValueError(f"Reconciliation model did not account for every {category} record")
+        except ValueError as exc:
+            skipped_categories.append({"category": category, "reason": str(exc)[:500]})
+            continue
         reconciled[category] = canonical_records
-        summaries.append(
-            {
-                "category": category,
-                "before_count": len(source_records),
-                "after_count": len(canonical_records),
-                "decisions": category_summary,
-            }
-        )
-    return reconciled, summaries
+        summaries.append(summary)
+    return reconciled, summaries, skipped_categories
 
 
 def reconcile_provider_records(provider_ref):
@@ -134,7 +144,7 @@ def reconcile_provider_records(provider_ref):
         from app.gemini import reconcile_provider_records_with_gemini
 
         response, model = reconcile_provider_records_with_gemini(candidates)
-        reconciled, summaries = validate_reconciliation(candidates, response)
+        reconciled, summaries, skipped_categories = validate_reconciliation(candidates, response)
     except Exception as exc:
         # An unavailable or invalid second-pass response must never block ingestion
         # or mutate structured data.
@@ -169,6 +179,7 @@ def reconcile_provider_records(provider_ref):
             "revision_type": "model_reconciliation",
             "model": model,
             "categories": summaries,
+            "skipped_categories": skipped_categories,
             "updated_categories": sorted(updates),
             "review_count": review_count,
             "recorded_at": firestore.SERVER_TIMESTAMP,
@@ -180,6 +191,7 @@ def reconcile_provider_records(provider_ref):
         "status": "reconciled" if updates else "no_changes",
         "updated_categories": sorted(updates),
         "review_count": review_count,
+        "skipped_categories": skipped_categories,
         "reconciliation_id": reconciliation_ref.id,
         "provider": {**provider, **updates},
     }
