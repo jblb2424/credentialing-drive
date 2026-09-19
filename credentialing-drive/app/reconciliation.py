@@ -135,11 +135,19 @@ def reconcile_provider_records(provider_ref):
 
         response, model = reconcile_provider_records_with_gemini(candidates)
         reconciled, summaries = validate_reconciliation(candidates, response)
-    except Exception:
+    except Exception as exc:
         # An unavailable or invalid second-pass response must never block ingestion
         # or mutate structured data.
-        logger.exception("Provider reconciliation failed for provider_id=%s", provider_ref.id)
-        return {"status": "failed", "updated_categories": []}
+        logger.exception(
+            "Provider reconciliation failed for provider_id=%s error=%s",
+            provider_ref.id,
+            type(exc).__name__,
+        )
+        return {
+            "status": "failed",
+            "updated_categories": [],
+            "failure_reason": str(exc)[:500],
+        }
 
     updates = {
         category: records
