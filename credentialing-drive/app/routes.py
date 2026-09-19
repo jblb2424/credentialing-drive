@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
 from google.cloud import firestore
 
-from app.config import EVENT_COLLECTION, SCOPES, allow_duplicate_drive_imports
+from app.config import EVENT_COLLECTION, PROVIDER_COLLECTION, SCOPES, allow_duplicate_drive_imports
 from app.connections import (
     create_flow, credentials_to_dict, get_connection, get_drive_service, get_firestore_client,
     get_webhook_url, update_connection,
@@ -20,8 +20,9 @@ from app.task_queue import verify_task_request
 from app.providers import (
     delete_provider, get_entity, get_group, get_provider, get_provider_issue, list_groups,
     list_provider_expirations, list_providers, merge_duplicate_providers,
-    backfill_revision_previous_files,
+    backfill_revision_previous_files, get_entity_ref,
 )
+from app.reconciliation import reconcile_provider_records
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -137,6 +138,17 @@ async def reconcile_duplicate_providers(entity_id: str, request: Request):
     if not isinstance(target_provider_id, str) or not isinstance(duplicate_provider_ids, list):
         raise HTTPException(status_code=400, detail="Provide target_provider_id and duplicate_provider_ids")
     return merge_duplicate_providers(target_provider_id, duplicate_provider_ids, entity_id)
+
+
+@router.post("/internal/entities/{entity_id}/providers/{provider_id}/reconcile")
+def reconcile_provider(entity_id: str, provider_id: str, request: Request):
+    require_internal_token(request)
+    provider_ref = get_entity_ref(get_firestore_client(), entity_id).collection(
+        PROVIDER_COLLECTION
+    ).document(provider_id)
+    if not provider_ref.get().exists:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    return reconcile_provider_records(provider_ref)
 
 
 @router.delete("/internal/entities/{entity_id}/providers/{provider_id}")

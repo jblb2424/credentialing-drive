@@ -75,6 +75,8 @@ Use [`credentialing-drive/.env.example`](credentialing-drive/.env.example) as th
 | `GOOGLE_DRIVE_WEBHOOK_URL` | Public webhook URL ending in `/webhooks/google-drive`. |
 | `DOCUMENT_AI_PROCESSOR_ID` | Document AI OCR processor ID. |
 | `DRIVE_WATCH_RENEWAL_TOKEN` | Random secret used to renew Drive watches and protect internal maintenance endpoints. |
+| `GEMINI_RECONCILIATION_MODEL` | Optional model for the fresh second-pass duplicate reconciliation call. |
+| `RECONCILIATION_ENABLED` | Enables second-pass provider-record reconciliation; defaults to `true`. |
 
 For local dashboard work, Google ADC credentials are required for Firestore and other GCP clients:
 
@@ -138,4 +140,5 @@ Before deploying, configure runtime secrets and environment variables in Cloud R
 - Do not commit `.env`, OAuth client secrets, access tokens, or Drive content.
 - Do not persist source-document bytes. The intended design is in-memory processing with structured Firestore output.
 - Preserve normalized record identity and field provenance when changing ingestion behavior. Exact JSON equality is not a sufficient deduplication strategy for healthcare credentialing data.
+- The reconciliation pass is model-driven and only operates on repeated provider record categories. It validates that every canonical value is present in the model's cited input records before writing; ambiguous records remain unchanged.
 - Keep dashboard links client-scoped by preserving the `entity` query parameter.

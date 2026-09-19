@@ -26,6 +26,57 @@ def generate_gemini_json(contents):
     return response.text
 
 
+def reconcile_provider_records_with_gemini(candidates):
+    """Run a fresh, purpose-specific model pass over existing provider records."""
+    model = os.environ.get(
+        "GEMINI_RECONCILIATION_MODEL", os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    )
+    client = genai.Client(
+        vertexai=True,
+        project=get_project_id(),
+        location=os.environ.get("VERTEX_AI_LOCATION", "global"),
+    )
+    prompt = """You are a healthcare credentialing reconciliation reviewer. You receive
+already-extracted records for one provider, grouped by category. This is a fresh second
+pass: your only job is to identify duplicate records caused by wording, date precision,
+missing fields, or source formatting differences.
+
+Return JSON only in this exact shape:
+{"categories": {
+  "education": [
+    {
+      "source_record_indices": [0, 2],
+      "decision": "merge",
+      "canonical_record": {"...": "..."},
+      "confidence": 0.98,
+      "reason": "Same institution, residency, specialty, and compatible dates"
+    }
+  ]
+}}
+
+For EVERY category and EVERY input record index, return exactly one group. The
+`source_record_indices` across groups must contain every input index exactly once.
+Use `merge` only when records describe the same real-world item. Use `keep_separate`
+for distinct records. Use `needs_review` when evidence is ambiguous; those records will
+remain unchanged.
+
+`canonical_record` may only contain fields and exact values found in one or more records
+within its own `source_record_indices`. Do not invent, normalize, reformat, or infer
+values. Preserve the most complete supported values. Do not merge a historical insurance
+record with a current policy only because the carrier matches. Never merge different
+license, DEA, tax, NPI, or policy numbers. A verifier, registrar, or issuer is not
+automatically the school, training site, carrier, or practice named by another record.
+
+Candidate records:
+"""
+    response = client.models.generate_content(
+        model=model,
+        contents=prompt + json.dumps(candidates, default=str),
+        config={"response_mime_type": "application/json", "temperature": 0},
+    )
+    return parse_gemini_extraction(response.text), model
+
+
 def interpret_text_with_gemini(ocr_text):
     if not ocr_text:
         return {"document_type": "unknown", "summary": "No text extracted"}

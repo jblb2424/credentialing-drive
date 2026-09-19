@@ -21,6 +21,7 @@ from app.provider_names import (
     enrich_provider_name, name_values_equivalent, split_provider_name_and_credentials,
 )
 from app.provider_types import normalize_provider_type
+from app.reconciliation import reconcile_provider_records
 
 logger = logging.getLogger(__name__)
 
@@ -708,8 +709,10 @@ def upsert_normalized_provider(provider, metadata, document_category="other"):
         provider_ref, metadata, changes, document_category, previous_files
     )
     record_field_provenance(provider_ref, metadata, changes)
+    reconciliation = reconcile_provider_records(provider_ref)
+    reconciled_provider = reconciliation.get("provider", canonical_provider)
     try:
-        sync_provider_to_bigquery(provider_id, canonical_provider)
+        sync_provider_to_bigquery(provider_id, reconciled_provider)
     except Exception:
         # Firestore remains the system of record if reporting is temporarily unavailable.
         logger.exception("BigQuery provider sync failed for provider_id=%s", provider_id)

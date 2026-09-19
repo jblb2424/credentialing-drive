@@ -20,6 +20,7 @@ PROVIDER_COLLECTION = "providers"
 PROVIDER_IDENTITY_COLLECTION = "provider_identities"
 PROVIDER_GROUP_MEMBERSHIP_COLLECTION = "provider_group_memberships"
 PAYER_ENROLLMENT_COLLECTION = "payer_enrollments"
+RECONCILIATION_COLLECTION = "reconciliations"
 DEFAULT_ENTITY_ID = "dummy-client"
 DEFAULT_ENTITY_NAME = "Dummy Client"
 BIGQUERY_REPORTING_DATASET = "credentialing_reporting"
@@ -61,3 +62,8 @@ DOCUMENT_CATEGORIES = (
 def allow_duplicate_drive_imports():
     """Temporary replay switch for controlled ingestion testing."""
     return os.environ.get("ALLOW_DUPLICATE_DRIVE_IMPORTS", "false").lower() == "true"
+
+
+def reconciliation_enabled():
+    """Allow controlled disabling of the second-pass reconciliation call."""
+    return os.environ.get("RECONCILIATION_ENABLED", "true").lower() == "true"
