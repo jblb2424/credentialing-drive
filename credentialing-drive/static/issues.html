@@ -4,11 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#102a43">
-    <title>Open Issues | CredentialingHQ</title>
+    <title>Open Issues | Cozema Health</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:opsz,wght@5..120,600;5..120,700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=auth-foundation-20260926">
   </head>
   <body>
     <div class="app-shell">
@@ -18,23 +19,36 @@
         <nav class="main-nav" aria-label="Primary navigation">
           <a href="/"><span class="nav-icon">▦</span>Overview</a>
           <a href="/providers/view?entity=dummy-client"><span class="nav-icon">◉</span>Providers</a>
-          <a href="/enrollment/view?entity=dummy-client"><span class="nav-icon">↔</span>Enrollment</a>
           <a href="/expirations/view?entity=dummy-client"><span class="nav-icon">◷</span>Expirations</a>
-          <a href="/tasks/view?entity=dummy-client"><span class="nav-icon">✓</span>Tasks</a>
+          <a href="/activity/view?entity=dummy-client"><span class="nav-icon">◌</span>Activity</a>
           <a href="/reports/view?entity=dummy-client"><span class="nav-icon">▤</span>Reports</a>
           <a href="/settings/view?entity=dummy-client"><span class="nav-icon">⚙</span>Settings</a>
         </nav>
         <div class="sidebar-footer"><p>Data refreshes from your connected credentialing workspace.</p></div>
       </aside>
       <main class="workspace-content">
-        <header class="topbar"><div class="mobile-brand">Credentialing<span>HQ</span></div><div class="status-line"><span class="live-dot"></span>Live data</div></header>
+        <header class="topbar"><div class="mobile-brand">Credentialing<span>HQ</span></div><div class="status-line"><span class="live-dot"></span>Live data</div><div class="auth-controls" data-auth-controls hidden></div></header>
         <section class="workspace-hero"><p class="eyebrow">Credentialing operations</p><h1>Open issues</h1><p class="lede">Every outstanding discrepancy, missing field, and expiration that needs follow-up for this client.</p></section>
+        <section class="issue-summary-grid" aria-label="Issue summary" hidden>
+          <button class="issue-summary-card is-active" type="button" data-quick-filter="all"><span>Open issues</span><strong id="issue-count" class="is-loading" aria-busy="true"><span class="loading-skeleton" aria-hidden="true"></span><span class="sr-only">Loading issue count</span></strong><small>Across all provider records</small></button>
+          <button class="issue-summary-card" type="button" data-quick-filter="providers"><span>Providers affected</span><strong id="provider-count" class="is-loading" aria-busy="true"><span class="loading-skeleton" aria-hidden="true"></span><span class="sr-only">Loading provider count</span></strong><small>Records requiring attention</small></button>
+          <button class="issue-summary-card issue-summary-card-alert" type="button" data-quick-filter="expired"><span>Expired credentials</span><strong id="expired-count" class="is-loading" aria-busy="true"><span class="loading-skeleton" aria-hidden="true"></span><span class="sr-only">Loading expired credential count</span></strong><small>Requires immediate follow-up</small></button>
+          <button class="issue-summary-card issue-summary-card-warning" type="button" data-quick-filter="expiring"><span>Expiring soon</span><strong id="expiring-count" class="is-loading" aria-busy="true"><span class="loading-skeleton" aria-hidden="true"></span><span class="sr-only">Loading expiring credential count</span></strong><small>Within the next 90 days</small></button>
+        </section>
         <section class="workspace-panel">
-          <div class="section-heading"><div><p class="eyebrow">Needs attention</p><h2><span id="issue-count">--</span> open issues</h2></div></div>
-          <div class="provider-table-wrap"><table class="provider-table"><thead><tr><th>Issue</th><th>Provider</th><th>Severity</th><th>Source file</th><th aria-label="Open issue"></th></tr></thead><tbody id="issue-table-body"><tr><td colspan="5" class="record-table-empty">Loading open issues...</td></tr></tbody></table></div>
+          <div class="section-heading"><div><p class="eyebrow">Needs attention</p><h2 id="issue-results-heading">Loading issues</h2></div></div>
+          <div class="issue-controls">
+            <label class="issue-search" for="issue-search">⌕<input id="issue-search" type="search" placeholder="Search providers, practices, locations, or issues"></label>
+            <label>Severity<select id="severity-filter"><option value="">All severities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label>
+            <label>Issue type<select id="type-filter"><option value="">All issue types</option><option value="expired">Expired</option><option value="expiring">Expiring soon</option><option value="missing_data">Missing data</option><option value="discrepancy">Discrepancy</option></select></label>
+            <label>Filter by<select id="record-type-filter"><option value="all">All records</option><option value="provider">Providers</option><option value="practice">Practices</option></select></label>
+          </div>
+          <div id="issue-groups" class="issue-groups" aria-live="polite"><div class="workspace-empty"><div class="loading-row"><span class="spinner"></span>Loading open issues...</div></div></div>
+          <div class="issue-load-more"><span id="issue-result-count"></span><button id="load-more-issues" class="secondary-button" type="button" hidden>Load more records <span>↓</span></button></div>
         </section>
       </main>
     </div>
-    <script src="/static/issues.js?v=20260917a"></script>
+    <script type="module" src="/static/auth.js?v=clerk-20260927"></script>
+    <script src="/static/issues.js?v=priority-tiers-20260923"></script>
   </body>
 </html>

@@ -1,0 +1,54 @@
+# Explicit Better Auth cutover configuration. Keep the standard production
+# build Clerk-compatible so rollback is a traffic switch, not a secret rewrite.
+substitutions:
+  _REGION: us-east1
+  _REPOSITORY: credentialing
+  _SERVICE: credentialing-drive
+  _FIRESTORE_DATABASE: credentialing-drive
+  _TASKS_LOCATION: us-east1
+  _TASKS_QUEUE: drive-document-processing
+  _CLOUD_SQL_INSTANCE: healthcare-credentialing-prod:us-east1:cozema-auth-prod
+  _APP_BASE_URL: https://app.cozemahealth.com
+  _GOOGLE_REDIRECT_URI: https://app.cozemahealth.com/oauth/google/callback
+  _GOOGLE_DRIVE_WEBHOOK_URL: https://app.cozemahealth.com/webhooks/google-drive
+  _BETTER_AUTH_URL: https://auth.cozemahealth.com
+  _BETTER_AUTH_JWT_AUDIENCE: https://app.cozemahealth.com
+  _COZEMA_PLATFORM_ADMIN_EMAILS: justin.barry97@gmail.com
+  _GOOGLE_CLIENT_ID_VERSION: "1"
+  _GOOGLE_CLIENT_SECRET_VERSION: "1"
+  _BETTER_AUTH_DATABASE_URL_VERSION: "1"
+  _AUTH_EVENT_WEBHOOK_SECRET_VERSION: "1"
+
+serviceAccount: projects/$PROJECT_ID/serviceAccounts/credentialing-drive-deployer@$PROJECT_ID.iam.gserviceaccount.com
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --tag=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$BUILD_ID
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$BUILD_ID
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$BUILD_ID
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --service-account=credentialing-drive-runtime@$PROJECT_ID.iam.gserviceaccount.com
+      - --add-cloudsql-instances=${_CLOUD_SQL_INSTANCE}
+      - --update-secrets=GOOGLE_CLIENT_ID=credentialing-drive-prod-google-client-id:${_GOOGLE_CLIENT_ID_VERSION},GOOGLE_CLIENT_SECRET=credentialing-drive-prod-google-client-secret:${_GOOGLE_CLIENT_SECRET_VERSION},BETTER_AUTH_DATABASE_URL=better-auth-database-url:${_BETTER_AUTH_DATABASE_URL_VERSION},AUTH_EVENT_WEBHOOK_SECRET=auth-event-webhook-secret:${_AUTH_EVENT_WEBHOOK_SECRET_VERSION}
+      - --update-env-vars=GCP_PROJECT_ID=$PROJECT_ID,FIRESTORE_DATABASE=${_FIRESTORE_DATABASE},CLOUD_TASKS_LOCATION=${_TASKS_LOCATION},CLOUD_TASKS_QUEUE=${_TASKS_QUEUE},TASK_PROCESSOR_URL=${_APP_BASE_URL}/tasks/process-drive-file,TASK_INVOKER_SERVICE_ACCOUNT=credentialing-drive-tasks@$PROJECT_ID.iam.gserviceaccount.com,DRIVE_WATCH_RENEWAL_SERVICE_ACCOUNT=credentialing-drive-scheduler@$PROJECT_ID.iam.gserviceaccount.com,DRIVE_WATCH_RENEWAL_AUDIENCE=${_APP_BASE_URL},APP_BASE_URL=${_APP_BASE_URL},GOOGLE_REDIRECT_URI=${_GOOGLE_REDIRECT_URI},GOOGLE_DRIVE_WEBHOOK_URL=${_GOOGLE_DRIVE_WEBHOOK_URL},AUTH_PROVIDER=better_auth,BETTER_AUTH_URL=${_BETTER_AUTH_URL},BETTER_AUTH_JWT_AUDIENCE=${_BETTER_AUTH_JWT_AUDIENCE},BETTER_AUTH_GOOGLE_SIGN_IN_ENABLED=true,COZEMA_PLATFORM_ADMIN_EMAILS=${_COZEMA_PLATFORM_ADMIN_EMAILS}
+      - --labels=environment=production,managed-by=cloud-build,auth-provider=better-auth
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$BUILD_ID

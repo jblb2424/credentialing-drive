@@ -1,0 +1,38 @@
+{
+  "displayName": "Production: Cloud Tasks failed attempts",
+  "documentation": {
+    "content": "A Drive document-processing task returned a non-success response. Inspect the task attempt, the Cloud Run worker request, and the affected client document before retrying.",
+    "mimeType": "text/markdown"
+  },
+  "userLabels": {
+    "environment": "production",
+    "component": "cloud-tasks"
+  },
+  "conditions": [
+    {
+      "displayName": "Non-success task attempt in the Drive queue",
+      "conditionThreshold": {
+        "filter": "metric.type=\"cloudtasks.googleapis.com/queue/task_attempt_count\" resource.type=\"cloud_tasks_queue\" resource.label.\"queue_id\"=\"drive-document-processing\" metric.label.\"response_code\"!=\"ok\"",
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "60s",
+        "aggregations": [
+          {
+            "alignmentPeriod": "60s",
+            "perSeriesAligner": "ALIGN_SUM"
+          }
+        ],
+        "trigger": {
+          "count": 1
+        }
+      }
+    }
+  ],
+  "combiner": "OR",
+  "notificationChannels": [
+    "projects/healthcare-credentialing-prod/notificationChannels/11678299693917119849"
+  ],
+  "alertStrategy": {
+    "autoClose": "1800s"
+  }
+}

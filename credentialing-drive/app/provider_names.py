@@ -5,6 +5,40 @@ import re
 from app.provider_types import normalize_provider_type
 
 
+def normalize_person_name(value):
+    """Apply a consistent display case to a human-name value.
+
+    This is deliberately limited to person-name fields. Identifiers, credentials,
+    addresses, and organization names have their own formatting rules and must not
+    be title-cased as a side effect of provider validation.
+    """
+    if not isinstance(value, str):
+        return value
+
+    normalized = " ".join(value.split())
+    if not normalized:
+        return None
+
+    suffixes = {"jr": "Jr.", "sr": "Sr.", "ii": "II", "iii": "III", "iv": "IV"}
+    parts = []
+    for part in normalized.split(" "):
+        suffix = suffixes.get(part.rstrip(".").lower())
+        if suffix:
+            parts.append(suffix)
+        elif re.fullmatch(r"[A-Za-z]\\.?", part):
+            parts.append(part[0].upper() + ("." if part.endswith(".") else ""))
+        else:
+            parts.append(part.title())
+    return " ".join(parts)
+
+
+def person_name_values_equivalent(previous_value, current_value):
+    """Treat capitalization-only changes to one name field as equivalent."""
+    previous = normalize_person_name(previous_value)
+    current = normalize_person_name(current_value)
+    return bool(previous and current and previous.casefold() == current.casefold())
+
+
 def credential_segment(value):
     """Return whether a trailing name segment is a credential designation."""
     normalized = str(value or "").strip()
@@ -79,13 +113,16 @@ def enrich_provider_name(profile):
     profile = dict(profile or {})
     cleaned_name, name_credentials = split_provider_name_and_credentials(profile.get("name"))
     if cleaned_name:
-        profile["name"] = cleaned_name
+        profile["name"] = normalize_person_name(cleaned_name)
     if not profile.get("credentials") and name_credentials:
         profile["credentials"] = name_credentials
 
     for field_name, parsed_value in name_parts(cleaned_name).items():
         if not profile.get(field_name) and parsed_value:
             profile[field_name] = parsed_value
+
+    for field_name in ("first_name", "middle_name", "last_name"):
+        profile[field_name] = normalize_person_name(profile.get(field_name))
 
     canonical_name = canonical_provider_name(profile)
     if canonical_name:

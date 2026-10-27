@@ -14,10 +14,12 @@ const elements = {
   locations: document.querySelector("#location-list"),
   w9: document.querySelector("#w9-grid"),
   summary: document.querySelector("#summary-list"),
+  issues: document.querySelector("#practice-issue-list"),
+  activityLink: document.querySelector("#practice-activity-link"),
 };
 
 function escapeHtml(value) {
-  return String(value ?? "Not provided")
+  return String(value ?? "Field value not captured")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -25,8 +27,8 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function value(input) {
-  return input === undefined || input === null || input === "" ? "Not provided" : input;
+function value(input, fieldLabel = "Field value") {
+  return input === undefined || input === null || input === "" ? `${fieldLabel} not captured` : input;
 }
 
 function formatAddress(address) {
@@ -47,7 +49,7 @@ function textList(input) {
 }
 
 function fieldGrid(entries) {
-  return entries.map(([label, content]) => `<div class="data-field"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value(content))}</strong></div>`).join("");
+  return entries.map(([label, content]) => `<div class="data-field"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value(content, label))}</strong></div>`).join("");
 }
 
 function renderLocations(locations) {
@@ -62,7 +64,7 @@ function renderLocations(locations) {
       : typeof location.name === "string" ? location.name : "Practice location";
     const details = [formatAddress(location.address || embeddedAddress), textList(location.phone), textList(location.email)].filter(Boolean).join(" · ");
     const supporting = [location.practice_hours && `Hours: ${textList(location.practice_hours)}`, location.faxes && `Fax: ${textList(location.faxes)}`, location.languages && `Languages: ${textList(location.languages)}`].filter(Boolean).join(" · ");
-    return `<article class="location-card"><span class="location-type">${escapeHtml(value(location.type || "Practice location"))}</span><h3>${escapeHtml(value(title))}</h3><p>${escapeHtml(value(details))}</p>${supporting ? `<span class="practice-note">${escapeHtml(supporting)}</span>` : ""}</article>`;
+    return `<article class="location-card"><span class="location-type">${escapeHtml(value(location.type, "Location type"))}</span><h3>${escapeHtml(value(title, "Location name"))}</h3><p>${escapeHtml(value(details, "Location contact details"))}</p>${supporting ? `<span class="practice-note">${escapeHtml(supporting)}</span>` : ""}</article>`;
   }).join("");
 }
 
@@ -80,12 +82,39 @@ function renderW9(group) {
   ]);
 }
 
+function humanizeField(value) {
+  return String(value || "practice information")
+    .replace("group.", "").replace(/^locations\[[^\]]+\]\./, "location ")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function issueLabel(issue) {
+  const field = issue.display_label || humanizeField((issue.affected_fields || []).join(", "));
+  if (issue.type === "missing_data") return `Missing ${field}`;
+  if (issue.type === "discrepancy") return `Conflicting ${field}`;
+  return issue.type?.replaceAll("_", " ") || "Needs review";
+}
+
+function renderIssues(group) {
+  const issues = Array.isArray(group.issues) ? group.issues : [];
+  if (!issues.length) {
+    elements.issues.innerHTML = '<p class="aside-empty">No open practice issues.</p>';
+    return;
+  }
+  elements.issues.innerHTML = issues.slice(0, 5).map((issue) => {
+    const issueUrl = `/practices/${encodeURIComponent(group.id)}/issues/${encodeURIComponent(issue.id)}/view?entity=${encodeURIComponent(entityId)}`;
+    return `<a class="record-issue" href="${issueUrl}"><p>${escapeHtml(issueLabel(issue))}</p><span class="severity-tag severity-${escapeHtml(issue.severity || "low")}">${escapeHtml(issue.severity || "review")}</span><span class="issue-type-tag issue-type-${escapeHtml(issue.type || "review")}">${escapeHtml(String(issue.type || "review").replaceAll("_", " "))}</span><span class="issue-link">View issue →</span></a>`;
+  }).join("");
+}
+
 function renderPractice(group) {
   const legalName = group.legal_name || group.name || "Unnamed practice";
   const locations = Array.isArray(group.locations) ? group.locations : [];
   elements.name.textContent = legalName;
   elements.crumbPractice.textContent = legalName;
   elements.subtitle.textContent = group.dba ? `DBA: ${group.dba}` : "Organization credentialing profile";
+  elements.activityLink.href = `/activity/view?entity=${encodeURIComponent(entityId)}&record_type=practice&record_id=${encodeURIComponent(group.id)}`;
   elements.identity.innerHTML = fieldGrid([
     ["Legal name", legalName],
     ["DBA", group.dba],
@@ -94,11 +123,13 @@ function renderPractice(group) {
   ]);
   renderLocations(locations);
   renderW9(group);
+  renderIssues(group);
   elements.summary.innerHTML = [
     ["Locations", locations.length],
     ["Linked providers", group.provider_count || 0],
-    ["W-9", group.w9 ? "Captured" : "Not captured"],
-  ].map(([label, summaryValue]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value(summaryValue))}</strong></div>`).join("");
+    ["Open issues", group.issue_count || 0],
+    ["W-9", group.w9 ? "Captured" : "W-9 not captured"],
+  ].map(([label, summaryValue]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value(summaryValue, label))}</strong></div>`).join("");
 }
 
 async function loadPractice() {

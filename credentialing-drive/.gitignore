@@ -4,3 +4,6 @@ __pycache__/
 .env
 .env.*
 !.env.example
+react-dashboard/node_modules/
+react-dashboard/dist/
+auth-service/node_modules/

@@ -1,0 +1,8 @@
+.git
+.DS_Store
+**/__pycache__/
+**/*.py[cod]
+.env
+.env.*
+react-dashboard/node_modules/
+react-dashboard/dist/

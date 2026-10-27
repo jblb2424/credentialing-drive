@@ -6,14 +6,20 @@ const labelElement = document.querySelector("#expiration-label");
 const eyebrowElement = document.querySelector("#expiration-eyebrow");
 const tableElement = document.querySelector("#expiration-table-body");
 
+function setCount(value) {
+  countElement.classList.remove("is-loading");
+  countElement.setAttribute("aria-busy", "false");
+  countElement.textContent = value;
+}
+
 function escapeHtml(value) {
-  return String(value ?? "Not provided")
+  return String(value ?? "Field value not captured")
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
 }
 
 function formatDate(value) {
-  if (!value) return "Not provided";
+  if (!value) return "Expiration date not captured";
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" })
     .format(new Date(`${value}T00:00:00`));
 }
@@ -30,12 +36,12 @@ function render(records) {
     eyebrowElement.textContent = "Next 90 days";
     labelElement.textContent = "credentials expiring soon";
   }
-  countElement.textContent = records.length;
+  setCount(records.length);
   if (!records.length) {
     tableElement.innerHTML = '<tr><td colspan="5" class="record-table-empty">No credential expiration dates have been captured yet.</td></tr>';
     return;
   }
-  tableElement.innerHTML = records.map((record) => `<tr class="expiration-row" tabindex="0" role="button" data-provider-id="${escapeHtml(record.provider_id)}"><td>${escapeHtml(record.credential_label || "Unclassified credential")}<span class="expiration-subtitle">${escapeHtml((record.credential_category || "unclassified").replaceAll("_", " "))}</span></td><td><strong>${escapeHtml(record.provider_name)}</strong><span class="expiration-subtitle">${escapeHtml(record.provider_npi || "NPI not captured")}</span></td><td class="expiration-date">${escapeHtml(formatDate(record.expiration_date))}</td><td><span class="severity-tag status-${escapeHtml(record.type)}">${escapeHtml(statusLabel(record))}</span></td><td class="open-record">→</td></tr>`).join("");
+  tableElement.innerHTML = records.map((record) => `<tr class="expiration-row ${record.type === "expired" ? "is-expired" : ""}" tabindex="0" role="button" data-provider-id="${escapeHtml(record.provider_id)}"><td>${escapeHtml(record.credential_label || "Unclassified credential")}<span class="expiration-subtitle">${escapeHtml((record.credential_category || "unclassified").replaceAll("_", " "))}</span></td><td><strong>${escapeHtml(record.provider_name)}</strong><span class="expiration-subtitle">${escapeHtml(record.provider_npi || "NPI not captured")}</span></td><td class="expiration-date ${record.type === "expired" ? "is-expired" : ""}">${escapeHtml(formatDate(record.expiration_date))}</td><td><span class="severity-tag status-${escapeHtml(record.type)}">${escapeHtml(statusLabel(record))}</span></td><td class="open-record">→</td></tr>`).join("");
 }
 
 function openProvider(providerId) {
@@ -60,5 +66,6 @@ fetch(`/entities/${encodeURIComponent(entityId)}/expirations?limit=5000`)
   })
   .then((response) => render(response.expirations || []))
   .catch((error) => {
+    setCount("Unavailable");
     tableElement.innerHTML = `<tr><td colspan="5" class="record-table-empty">${escapeHtml(error.message)}</td></tr>`;
   });

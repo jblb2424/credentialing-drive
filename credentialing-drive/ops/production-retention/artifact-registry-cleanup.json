@@ -1,0 +1,19 @@
+[
+  {
+    "name": "delete-old-production-images",
+    "action": { "type": "Delete" },
+    "condition": {
+      "tagState": "any",
+      "packageNamePrefixes": ["credentialing-drive", "cozema-auth"],
+      "olderThan": "45d"
+    }
+  },
+  {
+    "name": "keep-recent-production-images",
+    "action": { "type": "Keep" },
+    "mostRecentVersions": {
+      "packageNamePrefixes": ["credentialing-drive", "cozema-auth"],
+      "keepCount": 10
+    }
+  }
+]

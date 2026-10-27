@@ -7,8 +7,14 @@ const elements = {
 };
 let providers = [];
 
+function setCount(value) {
+  elements.count.classList.remove("is-loading");
+  elements.count.setAttribute("aria-busy", "false");
+  elements.count.textContent = value;
+}
+
 function escapeHtml(value) {
-  return String(value ?? "Not provided")
+  return String(value ?? "Field value not captured")
     .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
 }
@@ -28,12 +34,12 @@ function renderProviders() {
   const query = elements.search.value.trim().toLowerCase();
   const visible = providers.filter((provider) => [providerName(provider), provider.provider?.npi, provider.provider?.credentials]
     .filter(Boolean).join(" ").toLowerCase().includes(query));
-  elements.count.textContent = providers.length;
+  setCount(providers.length);
   if (!visible.length) {
     elements.table.innerHTML = '<tr><td colspan="5" class="record-table-empty">No provider records match this search.</td></tr>';
     return;
   }
-  elements.table.innerHTML = visible.map((provider) => `<tr class="expiration-row" tabindex="0" role="button" data-provider-id="${escapeHtml(provider.id)}"><td>${escapeHtml(providerName(provider))}</td><td>${escapeHtml(provider.provider?.npi || "Not provided")}</td><td>${escapeHtml(provider.provider?.credentials || "—")}</td><td>${recordHealth(provider)}</td><td class="open-record">→</td></tr>`).join("");
+  elements.table.innerHTML = visible.map((provider) => `<tr class="expiration-row" tabindex="0" role="button" data-provider-id="${escapeHtml(provider.id)}"><td>${escapeHtml(providerName(provider))}</td><td>${escapeHtml(provider.provider?.npi || "NPI not captured")}</td><td>${escapeHtml(provider.provider?.credentials || "Credentials not captured")}</td><td>${recordHealth(provider)}</td><td class="open-record">→</td></tr>`).join("");
 }
 
 function openProvider(providerId) {
@@ -62,5 +68,6 @@ fetch(`/entities/${encodeURIComponent(entityId)}/providers?limit=500`)
     renderProviders();
   })
   .catch((error) => {
+    setCount("Unavailable");
     elements.table.innerHTML = `<tr><td colspan="5" class="record-table-empty">${escapeHtml(error.message)}</td></tr>`;
   });

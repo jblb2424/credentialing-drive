@@ -14,6 +14,9 @@ CLOUD_TASKS_QUEUE = "drive-document-processing"
 CLOUD_TASKS_LOCATION = "us-east1"
 TASK_PROCESSOR_PATH = "/tasks/process-drive-file"
 ENTITY_COLLECTION = "entities"
+ENTITY_MEMBER_COLLECTION = "members"
+AUDIT_EVENT_COLLECTION = "audit_events"
+SECURITY_AUDIT_COLLECTION = "security_audit_events"
 GROUP_COLLECTION = "groups"
 LOCATION_COLLECTION = "locations"
 PROVIDER_COLLECTION = "providers"
@@ -21,6 +24,8 @@ PROVIDER_IDENTITY_COLLECTION = "provider_identities"
 PROVIDER_GROUP_MEMBERSHIP_COLLECTION = "provider_group_memberships"
 PAYER_ENROLLMENT_COLLECTION = "payer_enrollments"
 RECONCILIATION_COLLECTION = "reconciliations"
+ISSUE_RESOLUTION_COLLECTION = "issue_resolutions"
+ISSUE_SUMMARY_COLLECTION = "issue_summaries"
 DEFAULT_ENTITY_ID = "dummy-client"
 DEFAULT_ENTITY_NAME = "Dummy Client"
 BIGQUERY_REPORTING_DATASET = "credentialing_reporting"
@@ -62,6 +67,11 @@ DOCUMENT_CATEGORIES = (
 def allow_duplicate_drive_imports():
     """Temporary replay switch for controlled ingestion testing."""
     return os.environ.get("ALLOW_DUPLICATE_DRIVE_IMPORTS", "false").lower() == "true"
+
+
+def drive_watch_owner():
+    """Identify the environment responsible for renewing a Drive watch."""
+    return os.environ.get("DRIVE_WATCH_OWNER", "cloud").strip() or "cloud"
 
 
 def reconciliation_enabled():

@@ -4,8 +4,12 @@ google-api-python-client
 google-auth-oauthlib
 google-cloud-storage
 google-cloud-firestore
+clerk-backend-api
+PyJWT[crypto]
+psycopg[binary]
 google-cloud-tasks
 google-cloud-documentai
 google-cloud-bigquery
 google-genai
 openpyxl
+PyYAML

@@ -1,0 +1,138 @@
+description: >-
+  Prompts used while classifying and extracting incoming credentialing documents
+  and spreadsheets before deterministic validation and persistence.
+prompts:
+  date_normalization_policy:
+    description: >-
+      Require every recognized date to preserve its source precision while using
+      the application's canonical ISO storage format.
+    prompt: |
+      For every date field, return a complete date as `YYYY-MM-DD`. Recognize source labels
+      such as Issued, Issue Date, Start Date, Effective Date, Expires, Expiration Date, and
+      End Date. Put dates on the identified credential item whenever possible rather than
+      only in `expiration_dates`. Do not invent a day: preserve a month-only date as
+      `YYYY-MM` and a year-only date as `YYYY`.
+
+  facts_and_verification_sources_policy:
+    description: >-
+      Separate credentialing facts from people and organizations that appear only
+      as evidence, issuers, or verification contacts.
+    prompt: |
+      Facts versus verification sources:
+      The canonical fact fields and arrays describe real-world provider, practice, location,
+      credential, education, specialty, insurance, and payer facts. Only add an item to one of
+      those fields when the document directly supports that fact.
+
+      Use `verification_sources` for people or organizations that appear only as evidence,
+      verification, issuing, registry, contact, or signing context. Each item must be an object
+      with `name`, `role`, `supports_fact_domains`, and `notes`. `supports_fact_domains` is an
+      array using one or more of provider, group, location, license, specialty, education,
+      liability_insurance, or payer_enrollment.
+
+      Examples: an education institution is an education fact, but its registrar or GME office
+      is a verification source; a driver's license can support provider identity facts, while a
+      DMV or issuing office is a verification source; a state issuing a professional license is
+      a license attribute, while a licensing-board contact is a verification source. Never create
+      a provider, group, location, education, credential, payer, insurer, or other factual record
+      solely from a verification source. Do not invent unsupported facts or sources.
+
+  document_extraction:
+    description: >-
+      Extract supported provider and practice credentialing facts from OCR text
+      into the canonical ingestion schema without inventing information.
+    prompt: |
+      You interpret healthcare credentialing documents. Return JSON only with these keys:
+      document_type, entity_name, group_name, group, provider, locations, provider_locations, payers,
+      payer_enrollments, licenses, specialties, education, liability_insurance, expiration_dates,
+      verification_sources, and summary.
+      `group` must be an object with legal_name, type_2_npi, tax_id, dba, w9, aliases,
+      source_role, and entity_kind. source_role must be one of primary_practice, employer,
+      organization_letterhead, legal_business, billing_entity, pay_to_entity, applicant,
+      registrant, named_insured, subject, issuer, training_institution, insurer, payer,
+      reviewer, verification_source, other, or unknown. entity_kind must be organization,
+      individual, or unknown. When available,
+      `w9` may contain legal_name, tax_id, and signed_date. Capture group-level values only when they
+      are supported by the document; use null for missing values and never invent identifiers.
+      Never place the provider, applicant, registrant, named insured, subject, or an individual/sole
+      proprietor pay-to entity in group. For a distinct organization named as the provider's practice,
+      employer, or on organization letterhead, use the matching organization source_role. Preserve an
+      alternate source spelling in aliases only when it refers to that same organization.
+      `provider` must be an object with name, first_name, middle_name, last_name, provider_type,
+      credentials, gender, date_of_birth, npi, caqh_id, and address.
+      Set `provider_type` only to a specific standardized clinical designation when explicitly
+      supported (for example MD, DO, NP, PA, RN, PT, OT, SLP, DDS, DMD, DPM, OD, or PharmD).
+      Do not use broad role labels such as Physician, Physician and Surgeon, Practitioner,
+      Individual practitioner, or Clinician as `provider_type`; use null when no specific
+      designation is supported. Preserve the original designation, when relevant, in `credentials`.
+      Each item in `locations` or `provider_locations` may contain display_name, type, address, phone,
+      email, practice_hours, faxes, and languages. Each `licenses` item may contain type, license_number,
+      issue_date, expiration_date, and state. Each `specialties` item may contain name, board_certified,
+      certification_date, expiration_date, and certifying_board. Each `education` item may contain
+      education_type, institution_name, degree, specialty, start_date, and end_date. Each
+      `liability_insurance` item may contain insurance_type, carrier_name, policy_number, effective_date,
+      expiration_date, claim_amount, and aggregate_amount. Each `payer_enrollments` item may contain
+      payer_name, group_name, location_names, and enrollment_status.
+      Use null or empty arrays when a value is not present. Do not infer values that are not supported by the text.
+      Use conventional display capitalization for human personal names in `name`, `first_name`,
+      `middle_name`, and `last_name` (for example, `Avery Rowan`, never `AVERY ROWAN`).
+      Preserve accents and punctuation. Do not alter identifiers or credential abbreviations; preserve
+      the factual value of dates while formatting them according to the date rule below.
+
+      {{ date_normalization_policy }}
+      {{ facts_and_verification_sources_policy }}
+      OCR text:
+
+  document_category_classification:
+    description: >-
+      Assign one supported document category to an uploaded file so every
+      resulting revision has consistent provenance.
+    prompt: |
+      Classify this healthcare credentialing upload into exactly one category.
+      Return JSON only in this shape: {"document_category": "..."}.
+      Use only one of these values:
+      {{ document_categories }}.
+      Choose other when the file does not clearly fit one category. Do not infer a category from
+      missing information. The file name is {{ file_name }}.
+
+      Document content:
+
+  spreadsheet_extraction:
+    description: >-
+      Convert unknown healthcare credentialing spreadsheet layouts into one
+      canonical record per supported provider while retaining source-row provenance.
+    prompt: |
+      You interpret healthcare credentialing onboarding spreadsheets with
+      unknown column names and layouts. Return JSON only in this shape:
+      {"providers": [{"source_row_numbers": [2], "document_type": "...",
+      "entity_name": null, "group_name": null,
+      "group": {"legal_name": null, "type_2_npi": null, "tax_id": null, "dba": null, "w9": null,
+      "aliases": [], "source_role": "unknown", "entity_kind": "unknown"},
+      "provider": {"name": null, "first_name": null, "middle_name": null, "last_name": null,
+      "provider_type": null, "credentials": null, "gender": null, "date_of_birth": null,
+      "npi": null, "caqh_id": null, "address": null},
+      "locations": [], "provider_locations": [], "payers": [], "payer_enrollments": [],
+      "licenses": [], "specialties": [], "education": [], "liability_insurance": [], "expiration_dates": [],
+      "verification_sources": [],
+      "summary": null}]}
+
+      Normalize every provider represented in the spreadsheet into this canonical shape.
+      Never place an individual provider, applicant, or individual/sole-proprietor payment entity in
+      group. Use group only for a distinct organization and set source_role to primary_practice,
+      employer, organization_letterhead, or legal_business with entity_kind organization. Otherwise
+      leave legal_name null and use source_role unknown.
+      For `provider_type`, use only a specific standardized clinical designation such as MD, DO,
+      NP, PA, RN, PT, OT, SLP, DDS, DMD, DPM, OD, or PharmD. Do not use broad role labels such as
+      Physician, Practitioner, or Clinician; use null when a specific designation is unavailable.
+      Use the original row numbers that support each provider in source_row_numbers. A provider
+      may use multiple rows when the layout requires it. Do not infer values that are not in the
+      spreadsheet, do not include a provider without a name or NPI, and use null or [] for unknown
+      values. Preserve all meaningful provider identity, payer, location, license, specialty, education,
+      liability coverage, and expiration information using the same structure as the document importer.
+      Use conventional display capitalization for personal-name fields, including `name`, `first_name`,
+      `middle_name`, and `last_name` (for example, `Avery Rowan`, never `AVERY ROWAN`). Preserve
+      accents and punctuation; do not alter identifiers or credential abbreviations. Preserve the
+      factual value of dates while formatting them according to the date rule below.
+
+      {{ date_normalization_policy }}
+      {{ facts_and_verification_sources_policy }}
+      Spreadsheet rows (each object contains an original row_number and raw, client-supplied columns):

@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from google.api_core.exceptions import AlreadyExists
 
 from app.config import (
-    DOCUMENT_MIME_TYPES, EVENT_COLLECTION, SPREADSHEET_MIME_TYPES,
+    DEFAULT_ENTITY_ID, DOCUMENT_MIME_TYPES, EVENT_COLLECTION, SPREADSHEET_MIME_TYPES,
     allow_duplicate_drive_imports,
 )
 from app.connections import get_firestore_client, update_connection
@@ -29,15 +29,15 @@ logger = logging.getLogger(__name__)
 
 
 
-def save_spreadsheet_providers(metadata, providers, document_category):
+def save_spreadsheet_providers(metadata, providers, document_category, entity_id=DEFAULT_ENTITY_ID):
     for extracted_provider in providers:
         extracted_provider.pop("source_row_numbers", None)
         normalized_provider = normalize_provider_data(extracted_provider)
-        upsert_normalized_group(normalized_provider)
-        upsert_normalized_provider(normalized_provider, metadata, document_category)
+        upsert_normalized_group(normalized_provider, metadata, document_category, entity_id)
+        upsert_normalized_provider(normalized_provider, metadata, document_category, entity_id)
 
 
-def process_drive_spreadsheet_in_memory(service, file_id):
+def process_drive_spreadsheet_in_memory(service, file_id, entity_id=DEFAULT_ENTITY_ID):
     metadata, spreadsheet_bytes = download_drive_spreadsheet(service, file_id)
     try:
         rows = parse_spreadsheet(spreadsheet_bytes, metadata["mimeType"])
@@ -45,7 +45,7 @@ def process_drive_spreadsheet_in_memory(service, file_id):
             metadata, json.dumps(rows, default=str)
         )
         providers = interpret_spreadsheet_with_gemini(rows)
-        save_spreadsheet_providers(metadata, providers, document_category)
+        save_spreadsheet_providers(metadata, providers, document_category, entity_id)
     finally:
         # Raw spreadsheet bytes are never persisted.
         spreadsheet_bytes = b""
@@ -57,14 +57,14 @@ def process_drive_spreadsheet_in_memory(service, file_id):
     }
 
 
-def save_document_provider(metadata, extraction, document_category):
+def save_document_provider(metadata, extraction, document_category, entity_id=DEFAULT_ENTITY_ID):
     provider = normalize_provider_data(extraction)
-    group_id = upsert_normalized_group(provider)
-    provider_id = upsert_normalized_provider(provider, metadata, document_category)
+    group_id = upsert_normalized_group(provider, metadata, document_category, entity_id)
+    provider_id = upsert_normalized_provider(provider, metadata, document_category, entity_id)
     return {"group_id": group_id, "provider_id": provider_id}
 
 
-def process_drive_document_in_memory(service, file_id):
+def process_drive_document_in_memory(service, file_id, entity_id=DEFAULT_ENTITY_ID):
     metadata, document_bytes = download_drive_document(service, file_id)
     try:
         extracted_text, page_count = extract_document_text(
@@ -77,7 +77,7 @@ def process_drive_document_in_memory(service, file_id):
         document_bytes = b""
 
     extraction = parse_gemini_extraction(interpretation)
-    save_document_provider(metadata, extraction, document_category)
+    save_document_provider(metadata, extraction, document_category, entity_id)
     return {
         "metadata": metadata,
         "document_category": document_category,
@@ -87,7 +87,7 @@ def process_drive_document_in_memory(service, file_id):
     }
 
 
-def process_queued_drive_file(service, file_id):
+def process_queued_drive_file(service, file_id, entity_id=DEFAULT_ENTITY_ID):
     """Process exactly one Drive file after Cloud Tasks dispatches its job."""
     metadata = get_drive_file_metadata(service, file_id)
     mime_type = metadata.get("mimeType")
@@ -95,7 +95,7 @@ def process_queued_drive_file(service, file_id):
         return {"status": "skipped", "metadata": metadata}
 
     if mime_type in SPREADSHEET_MIME_TYPES:
-        result = process_drive_spreadsheet_in_memory(service, file_id)
+        result = process_drive_spreadsheet_in_memory(service, file_id, entity_id)
         return {
             "status": "imported",
             "metadata": result["metadata"],
@@ -103,7 +103,7 @@ def process_queued_drive_file(service, file_id):
             "provider_count": result["provider_count"],
         }
 
-    result = process_drive_document_in_memory(service, file_id)
+    result = process_drive_document_in_memory(service, file_id, entity_id)
     return {
         "status": "processed",
         "metadata": result["metadata"],
@@ -113,7 +113,7 @@ def process_queued_drive_file(service, file_id):
     }
 
 
-def process_drive_changes(service, connection):
+def process_drive_changes(service, connection, entity_id=DEFAULT_ENTITY_ID):
     page_token = connection.get("page_token")
     folder_id = connection.get("folder_id")
     if not page_token or not folder_id:
@@ -153,7 +153,9 @@ def process_drive_changes(service, connection):
                 "change_type": change.get("changeType"),
                 "status": "detected",
             }
-            event_ref = client.collection(EVENT_COLLECTION).document(f"drive-{file_id}")
+            event_ref = client.collection("entities").document(entity_id).collection(
+                EVENT_COLLECTION
+            ).document(f"drive-{file_id}")
             if allow_duplicates:
                 event_ref.set(event, merge=True)
             else:
@@ -164,7 +166,7 @@ def process_drive_changes(service, connection):
                     continue
 
             try:
-                task_name = enqueue_drive_processing_task(file_id, allow_duplicates)
+                task_name = enqueue_drive_processing_task(entity_id, file_id, allow_duplicates)
             except Exception:
                 logger.exception("Could not enqueue Drive file_id=%s", file_id)
                 event_ref.set({"status": "enqueue_failed"}, merge=True)
@@ -182,8 +184,8 @@ def process_drive_changes(service, connection):
 
         page_token = result.get("nextPageToken")
         if page_token:
-            update_connection({"page_token": page_token})
+            update_connection({"page_token": page_token}, entity_id)
         elif result.get("newStartPageToken"):
-            update_connection({"page_token": result["newStartPageToken"]})
+            update_connection({"page_token": result["newStartPageToken"]}, entity_id)
 
     return detected_changes

@@ -40,16 +40,16 @@ def queue_path(client=None):
     )
 
 
-def task_id_for_file(file_id, allow_duplicate=False):
+def task_id_for_file(entity_id, file_id, allow_duplicate=False):
     # Cloud Tasks task IDs are restrictive; hash Drive's opaque file ID for safe idempotency.
-    task_id = f"drive-{hashlib.sha256(file_id.encode()).hexdigest()[:40]}"
+    task_id = f"drive-{hashlib.sha256(f'{entity_id}:{file_id}'.encode()).hexdigest()[:40]}"
     return f"{task_id}-{uuid.uuid4().hex[:8]}" if allow_duplicate else task_id
 
 
-def enqueue_drive_processing_task(file_id, allow_duplicate=False):
+def enqueue_drive_processing_task(entity_id, file_id, allow_duplicate=False):
     client = tasks_v2.CloudTasksClient()
     parent = queue_path(client)
-    task_name = f"{parent}/tasks/{task_id_for_file(file_id, allow_duplicate)}"
+    task_name = f"{parent}/tasks/{task_id_for_file(entity_id, file_id, allow_duplicate)}"
     target_url = get_task_processor_url()
     task = {
         "name": task_name,
@@ -57,7 +57,7 @@ def enqueue_drive_processing_task(file_id, allow_duplicate=False):
             "http_method": tasks_v2.HttpMethod.POST,
             "url": target_url,
             "headers": {"Content-Type": "application/json"},
-            "body": json.dumps({"file_id": file_id}).encode(),
+            "body": json.dumps({"entity_id": entity_id, "file_id": file_id}).encode(),
             "oidc_token": {
                 "service_account_email": get_task_service_account(),
                 "audience": target_url,

@@ -7,9 +7,9 @@ from google import genai
 
 from app.config import DOCUMENT_CATEGORIES, MAX_GEMINI_INPUT_CHARS
 from app.connections import get_project_id
+from app.prompts import prompt_template, render_prompt
 
 logger = logging.getLogger(__name__)
-
 
 
 def generate_gemini_json(contents):
@@ -36,39 +36,7 @@ def reconcile_provider_records_with_gemini(candidates):
         project=get_project_id(),
         location=os.environ.get("VERTEX_AI_LOCATION", "global"),
     )
-    prompt = """You are a healthcare credentialing reconciliation reviewer. You receive
-already-extracted records for one provider, grouped by category. This is a fresh second
-pass: your only job is to identify duplicate records caused by wording, date precision,
-missing fields, or source formatting differences.
-
-Return JSON only in this exact shape:
-{"categories": {
-  "education": [
-    {
-      "source_record_indices": [0, 2],
-      "decision": "merge",
-      "canonical_record": {"...": "..."},
-      "confidence": 0.98,
-      "reason": "Same institution, residency, specialty, and compatible dates"
-    }
-  ]
-}}
-
-For EVERY category and EVERY input record index, return exactly one group. The
-`source_record_indices` across groups must contain every input index exactly once.
-Use `merge` only when records describe the same real-world item. Use `keep_separate`
-for distinct records. Use `needs_review` when evidence is ambiguous; those records will
-remain unchanged.
-
-`canonical_record` may only contain fields and exact values found in one or more records
-within its own `source_record_indices`. Do not invent, normalize, reformat, or infer
-values. Preserve the most complete supported values. Do not merge a historical insurance
-record with a current policy only because the carrier matches. Never merge different
-license, DEA, tax, NPI, or policy numbers. A verifier, registrar, or issuer is not
-automatically the school, training site, carrier, or practice named by another record.
-
-Candidate records:
-"""
+    prompt = prompt_template("validation", "provider_record_reconciliation")
     response = client.models.generate_content(
         model=model,
         contents=prompt + json.dumps(candidates, default=str),
@@ -81,45 +49,25 @@ def interpret_text_with_gemini(ocr_text):
     if not ocr_text:
         return {"document_type": "unknown", "summary": "No text extracted"}
 
-    prompt = """You interpret healthcare credentialing documents. Return JSON only with these keys:
-document_type, entity_name, group_name, group, provider, locations, provider_locations, payers,
-payer_enrollments, licenses, specialties, education, liability_insurance, expiration_dates, and summary.
-`group` must be an object with legal_name, type_2_npi, tax_id, dba, and w9. When available,
-`w9` may contain legal_name, tax_id, and signed_date. Capture group-level values only when they
-are supported by the document; use null for missing values and never invent identifiers.
-`provider` must be an object with name, first_name, middle_name, last_name, provider_type,
-credentials, gender, date_of_birth, npi, caqh_id, and address.
-Set `provider_type` only to a specific standardized clinical designation when explicitly
-supported (for example MD, DO, NP, PA, RN, PT, OT, SLP, DDS, DMD, DPM, OD, or PharmD).
-Do not use broad role labels such as Physician, Physician and Surgeon, Practitioner,
-Individual practitioner, or Clinician as `provider_type`; use null when no specific
-designation is supported. Preserve the original designation, when relevant, in `credentials`.
-Each item in `locations` or `provider_locations` may contain display_name, type, address, phone,
-email, practice_hours, faxes, and languages. Each `licenses` item may contain type, license_number,
-issue_date, expiration_date, and state. Each `specialties` item may contain name, board_certified,
-certification_date, expiration_date, and certifying_board. Each `education` item may contain
-education_type, institution_name, degree, specialty, start_date, and end_date. Each
-`liability_insurance` item may contain insurance_type, carrier_name, policy_number, effective_date,
-expiration_date, claim_amount, and aggregate_amount. Each `payer_enrollments` item may contain
-payer_name, group_name, location_names, and enrollment_status.
-Use null or empty arrays when a value is not present. Do not infer values that are not supported by the text.
-
-OCR text:
-"""
+    prompt = render_prompt(
+        "ingestion",
+        "document_extraction",
+        date_normalization_policy=prompt_template("ingestion", "date_normalization_policy"),
+        facts_and_verification_sources_policy=prompt_template(
+            "ingestion", "facts_and_verification_sources_policy"
+        ),
+    )
     return generate_gemini_json(prompt + ocr_text[:MAX_GEMINI_INPUT_CHARS])
 
 
 def classify_document_category(metadata, content):
     """Classify each uploaded file once so all resulting revisions share its category."""
-    prompt = f"""Classify this healthcare credentialing upload into exactly one category.
-Return JSON only in this shape: {{"document_category": "..."}}.
-Use only one of these values:
-{", ".join(DOCUMENT_CATEGORIES)}.
-Choose other when the file does not clearly fit one category. Do not infer a category from
-missing information. The file name is {metadata.get("name")!r}.
-
-Document content:
-"""
+    prompt = render_prompt(
+        "ingestion",
+        "document_category_classification",
+        document_categories=", ".join(DOCUMENT_CATEGORIES),
+        file_name=repr(metadata.get("name")),
+    )
     try:
         category = parse_gemini_extraction(
             generate_gemini_json(prompt + content[:MAX_GEMINI_INPUT_CHARS])
@@ -136,30 +84,14 @@ def interpret_spreadsheet_with_gemini(rows):
     if not rows:
         return []
 
-    prompt = """You interpret healthcare credentialing onboarding spreadsheets with
-unknown column names and layouts. Return JSON only in this shape:
-{"providers": [{"source_row_numbers": [2], "document_type": "...",
-"entity_name": null, "group_name": null,
-"group": {"legal_name": null, "type_2_npi": null, "tax_id": null, "dba": null, "w9": null},
-"provider": {"name": null, "first_name": null, "middle_name": null, "last_name": null,
-"provider_type": null, "credentials": null, "gender": null, "date_of_birth": null,
-"npi": null, "caqh_id": null, "address": null},
-"locations": [], "provider_locations": [], "payers": [], "payer_enrollments": [],
-"licenses": [], "specialties": [], "education": [], "liability_insurance": [], "expiration_dates": [],
-"summary": null}]}
-
-Normalize every provider represented in the spreadsheet into this canonical shape.
-For `provider_type`, use only a specific standardized clinical designation such as MD, DO,
-NP, PA, RN, PT, OT, SLP, DDS, DMD, DPM, OD, or PharmD. Do not use broad role labels such as
-Physician, Practitioner, or Clinician; use null when a specific designation is unavailable.
-Use the original row numbers that support each provider in source_row_numbers. A provider
-may use multiple rows when the layout requires it. Do not infer values that are not in the
-spreadsheet, do not include a provider without a name or NPI, and use null or [] for unknown
-values. Preserve all meaningful provider identity, payer, location, license, specialty, education,
-liability coverage, and expiration information using the same structure as the document importer.
-
-Spreadsheet rows (each object contains an original row_number and raw, client-supplied columns):
-"""
+    prompt = render_prompt(
+        "ingestion",
+        "spreadsheet_extraction",
+        date_normalization_policy=prompt_template("ingestion", "date_normalization_policy"),
+        facts_and_verification_sources_policy=prompt_template(
+            "ingestion", "facts_and_verification_sources_policy"
+        ),
+    )
     max_batch_chars = MAX_GEMINI_INPUT_CHARS - len(prompt)
     batches = []
     batch = []

@@ -1,33 +1,136 @@
-from datetime import date, datetime
+from datetime import date
 
+from app.dates import parse_complete_date
 from app.provider_types import provider_type_values_conflict
-from app.provider_names import name_values_equivalent
+from app.provider_names import name_values_equivalent, person_name_values_equivalent
 
 EXPIRING_WINDOW_DAYS = 90
 
+# Priority tiers: critical issues block credentialing progress, discrepancies need
+# review next, and other absent data is follow-up work.
+CRITICAL_MISSING_FIELDS = {
+    "provider.npi",
+    "group.type_2_npi",
+    "licenses",
+    "liability_insurance",
+}
+
+# These requirements cover the provider record itself. Fields that can be legitimately
+# inapplicable (for example, middle name or languages) are intentionally excluded.
+REQUIRED_PROVIDER_FIELDS = (
+    "name",
+    "first_name",
+    "last_name",
+    "provider_type_or_credentials",
+    "gender",
+    "date_of_birth",
+    "npi",
+    "caqh_id",
+    "address",
+)
+
+# Group issues intentionally start with the identifiers and contact fields that are
+# required for credentialing operations. DBA and languages remain optional.
+REQUIRED_GROUP_FIELDS = ("legal_name", "type_2_npi", "tax_id")
+REQUIRED_GROUP_LOCATION_FIELDS = (
+    "display_name", "type", "address", "phone", "email", "practice_hours", "faxes",
+)
+
+REQUIRED_COLLECTION_FIELDS = {
+    "provider_locations": {
+        "required": ("display_name", "type", "address", "phone", "email", "practice_hours", "faxes"),
+        "aliases": {"display_name": ("display_name", "name", "location_name")},
+    },
+    "licenses": {
+        "required": ("type", "license_number", "issue_date", "expiration_date", "state"),
+        "aliases": {
+            "type": ("type", "license_type"),
+            "license_number": ("license_number", "number"),
+            "issue_date": ("issue_date", "issued_date"),
+            "expiration_date": ("expiration_date", "expires_at", "expiry_date"),
+            "state": ("state", "issued_state"),
+        },
+    },
+    "specialties": {
+        "required": ("name", "board_certified"),
+        "aliases": {
+            "name": ("name", "specialty"),
+            "board_certified": ("board_certified", "is_board_certified"),
+        },
+    },
+    "education": {
+        "required": ("education_type", "institution_name", "degree", "specialty", "start_date", "end_date"),
+        "aliases": {
+            "education_type": ("education_type", "type"),
+            "institution_name": ("institution_name", "institution"),
+            "degree": ("degree", "degree_received"),
+        },
+    },
+    "liability_insurance": {
+        "required": (
+            "insurance_type", "carrier_name", "policy_number", "effective_date", "expiration_date",
+            "claim_amount", "aggregate_amount",
+        ),
+        "aliases": {"insurance_type": ("insurance_type", "type")},
+    },
+    "payer_enrollments": {
+        "required": ("payer_name", "group_name", "location_names", "enrollment_status"),
+        "aliases": {
+            "payer_name": ("payer_name", "name"),
+            "group_name": ("group_name", "practice_name"),
+            "location_names": ("location_names", "locations"),
+            "enrollment_status": ("enrollment_status", "status"),
+        },
+    },
+}
+
+FIELD_LABELS = {
+    "provider_type_or_credentials": "provider type or credentials",
+    "display_name": "location name",
+    "practice_hours": "practice hours",
+    "license_number": "license number",
+    "issue_date": "issue date",
+    "expiration_date": "expiration date",
+    "board_certified": "board certification status",
+    "certification_date": "certification date",
+    "certifying_board": "certifying board",
+    "education_type": "education type",
+    "institution_name": "institution name",
+    "start_date": "start date",
+    "end_date": "end date",
+    "insurance_type": "insurance type",
+    "carrier_name": "carrier name",
+    "policy_number": "policy number",
+    "effective_date": "effective date",
+    "claim_amount": "claim amount",
+    "aggregate_amount": "aggregate amount",
+    "payer_name": "payer name",
+    "group_name": "practice",
+    "location_names": "participating locations",
+    "enrollment_status": "enrollment status",
+    "caqh_id": "CAQH ID",
+    "npi": "NPI",
+    "type_2_npi": "Type 2 NPI",
+    "tax_id": "tax ID",
+    "legal_name": "legal name",
+}
+
+COLLECTION_LABELS = {
+    "provider_locations": "provider location information",
+    "licenses": "license information",
+    "specialties": "specialty information",
+    "education": "education information",
+    "liability_insurance": "liability insurance information",
+    "payer_enrollments": "payer enrollment information",
+}
+
+GROUP_COLLECTION_LABELS = {
+    "locations": "practice location information",
+}
+
 
 def parse_expiration_date(value):
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    if not isinstance(value, str):
-        return None
-
-    normalized_value = value.strip()
-    for date_format in (
-        "%Y-%m-%d",
-        "%m/%d/%Y",
-        "%m-%d-%Y",
-        "%m/%d/%y",
-        "%B %d, %Y",
-        "%b %d, %Y",
-    ):
-        try:
-            return datetime.strptime(normalized_value, date_format).date()
-        except ValueError:
-            continue
-    return None
+    return parse_complete_date(value)
 
 
 def revision_field_changes(value, prefix=""):
@@ -51,10 +154,28 @@ def build_issue(issue_id, issue_type, severity, affected_fields, **details):
     }
 
 
-def discrepancy_issues(provider_ref):
+def provider_revisions(provider_ref):
+    """Load and order a provider's revision history once per issue calculation."""
+    revisions = [
+        {"id": snapshot.id, "data": snapshot.to_dict() or {}}
+        for snapshot in provider_ref.collection("revisions").stream()
+    ]
+    return sorted(
+        revisions,
+        key=lambda revision: revision_sort_key(revision["data"]),
+        reverse=True,
+    )
+
+
+def discrepancy_issues(revisions):
     issues = []
-    for revision_snapshot in provider_ref.collection("revisions").stream():
-        revision = revision_snapshot.to_dict() or {}
+    for revision_record in revisions:
+        revision = revision_record["data"]
+        # A human-confirmed correction is not a competing document source. Its
+        # provenance remains visible in Activity, but it must not create a false
+        # discrepancy against the prior imported value.
+        if revision.get("source_type") == "manual":
+            continue
         for field_path, change in revision_field_changes(revision.get("changes") or {}):
             if change["current"] == change["previous"]:
                 continue
@@ -66,17 +187,22 @@ def discrepancy_issues(provider_ref):
                 change["previous"], change["current"]
             ):
                 continue
-            severity = "critical" if field_path == "provider.npi" else "high"
+            if field_path in {
+                "provider.first_name",
+                "provider.middle_name",
+                "provider.last_name",
+            } and person_name_values_equivalent(change["previous"], change["current"]):
+                continue
             previous_file = (revision.get("previous_files") or {}).get(field_path) or {}
             issues.append(
                 build_issue(
-                    f"discrepancy-{revision_snapshot.id}-{field_path}",
+                    f"discrepancy-{revision_record['id']}-{field_path}",
                     "discrepancy",
-                    severity,
+                    "high",
                     [field_path],
                     previous_value=change["previous"],
                     current_value=change["current"],
-                    revision_id=revision_snapshot.id,
+                    revision_id=revision_record["id"],
                     file_name=revision.get("file_name"),
                     drive_file_id=revision.get("drive_file_id"),
                     previous_file_name=previous_file.get("file_name"),
@@ -96,35 +222,29 @@ def revision_source(revision):
     }
 
 
-def revision_sort_key(snapshot):
-    recorded_at = (snapshot.to_dict() or {}).get("recorded_at")
+def revision_sort_key(revision):
+    recorded_at = revision.get("recorded_at")
     return recorded_at.timestamp() if hasattr(recorded_at, "timestamp") else 0
 
 
-def latest_revision_source(provider_ref):
-    revisions = sorted(
-        provider_ref.collection("revisions").stream(), key=revision_sort_key, reverse=True
-    )
-    for snapshot in revisions:
-        source = revision_source(snapshot.to_dict() or {})
+def latest_revision_source(revisions):
+    for revision_record in revisions:
+        source = revision_source(revision_record["data"])
         if source:
             return source
     return {}
 
 
-def expiration_source(provider_ref, candidate):
+def expiration_source(revisions, candidate):
     """Find the revision that introduced the credential behind an expiration issue."""
-    revisions = sorted(
-        provider_ref.collection("revisions").stream(), key=revision_sort_key, reverse=True
-    )
-    for snapshot in revisions:
-        revision = snapshot.to_dict() or {}
+    for revision_record in revisions:
+        revision = revision_record["data"]
         additions = (revision.get("changes") or {}).get(candidate["collection_name"], {}).get(
             "added", []
         )
         if candidate["item"] in additions:
             return revision_source(revision)
-    return latest_revision_source(provider_ref)
+    return latest_revision_source(revisions)
 
 
 def first_present(item, field_names):
@@ -221,7 +341,7 @@ def expiration_record(candidate):
     record = {
         "id": issue_id,
         "type": "expired" if days_until_expiration < 0 else "expiring",
-        "severity": "high" if days_until_expiration < 0 else "medium",
+        "severity": "critical" if days_until_expiration < 0 else "medium",
         "affected_fields": [candidate["field_path"]],
         "expiration_date": expiration_date.isoformat(),
         "credential_category": category,
@@ -278,38 +398,204 @@ def expiration_records(provider):
     return [expiration_record(candidate) for candidate in expiration_candidates(provider)]
 
 
-def expiration_issues(provider_ref, provider):
+def expiration_issues(revisions, provider):
     issues = []
     for candidate in expiration_candidates(provider):
-        issue = expiration_issue(candidate, expiration_source(provider_ref, candidate))
+        issue = expiration_issue(candidate, expiration_source(revisions, candidate))
         if issue:
             issues.append(issue)
     return issues
 
 
-def missing_data_issues(provider_ref, provider):
+def missing_data_issues(_revisions, provider):
     profile = provider.get("provider") or {}
-    missing_fields = [
-        f"provider.{field_name}"
-        for field_name in ("name", "npi")
-        if not str(profile.get(field_name) or "").strip()
-    ]
-    if not missing_fields:
-        return []
+    missing_fields = []
+
+    for field_name in REQUIRED_PROVIDER_FIELDS:
+        if field_name == "provider_type_or_credentials":
+            if has_required_value(profile.get("provider_type")) or has_required_value(
+                profile.get("credentials")
+            ):
+                continue
+        elif has_required_value(profile.get(field_name)):
+            continue
+        missing_fields.append(f"provider.{field_name}")
+
+    for collection_name, requirements in REQUIRED_COLLECTION_FIELDS.items():
+        records = provider.get(collection_name) or []
+        if not records:
+            missing_fields.append(collection_name)
+            continue
+        for index, record in enumerate(records):
+            for field_name in requirements["required"]:
+                aliases = requirements.get("aliases", {}).get(field_name, (field_name,))
+                if any(
+                    has_required_value(record.get(alias))
+                    for alias in aliases
+                ) if isinstance(record, dict) else False:
+                    continue
+                missing_fields.append(f"{collection_name}[{index}].{field_name}")
+
+            if collection_name == "specialties" and is_board_certified(record):
+                for field_name in ("certification_date", "expiration_date", "certifying_board"):
+                    aliases = {
+                        "certification_date": ("certification_date", "certified_date"),
+                        "expiration_date": ("expiration_date", "expires_at"),
+                        "certifying_board": ("certifying_board", "board"),
+                    }[field_name]
+                    if not any(has_required_value(record.get(alias)) for alias in aliases):
+                        missing_fields.append(f"{collection_name}[{index}].{field_name}")
+
     return [
         build_issue(
-            "missing-critical-provider-data",
+            f"missing-required-{field_path}",
             "missing_data",
-            "high",
-            missing_fields,
-            **latest_revision_source(provider_ref),
+            missing_data_severity(field_path),
+            [field_path],
+            display_label=missing_field_display_label(field_path, provider),
         )
+        for field_path in missing_fields
     ]
+
+
+def group_missing_data_issues(group):
+    missing_fields = []
+    for field_name in REQUIRED_GROUP_FIELDS:
+        if not has_group_required_value(group.get(field_name)):
+            missing_fields.append(f"group.{field_name}")
+
+    locations = group.get("locations") or []
+    if not locations:
+        missing_fields.append("locations")
+    else:
+        for index, location in enumerate(locations):
+            for field_name in REQUIRED_GROUP_LOCATION_FIELDS:
+                if isinstance(location, dict) and has_group_required_value(location.get(field_name)):
+                    continue
+                missing_fields.append(f"locations[{index}].{field_name}")
+
+    return [
+        build_issue(
+            f"missing-required-{field_path}",
+            "missing_data",
+            missing_data_severity(field_path),
+            [field_path],
+            display_label=group_missing_field_display_label(field_path, group),
+        )
+        for field_path in missing_fields
+    ]
+
+
+def missing_data_severity(field_path):
+    return "critical" if field_path in CRITICAL_MISSING_FIELDS else "medium"
+
+
+def has_required_value(value):
+    return value not in (None, "", [], {})
+
+
+def has_group_required_value(value):
+    if not has_required_value(value):
+        return False
+    return not isinstance(value, str) or value.strip().lower() not in {"unknown", "not captured"}
+
+
+def is_board_certified(record):
+    if not isinstance(record, dict):
+        return False
+    value = record.get("board_certified", record.get("is_board_certified"))
+    return value is True or str(value).strip().lower() in {"true", "yes", "y"}
+
+
+def missing_field_display_label(field_path, provider):
+    """Create an operator-facing label while retaining the precise API field path."""
+    if field_path.startswith("provider."):
+        field_name = field_path.removeprefix("provider.")
+        return field_label(field_name)
+
+    if "[" not in field_path:
+        return COLLECTION_LABELS.get(field_path, field_label(field_path))
+
+    collection_name, indexed_field = field_path.split("[", maxsplit=1)
+    index_text, field_name = indexed_field.split("].", maxsplit=1)
+    records = provider.get(collection_name) or []
+    try:
+        record = records[int(index_text)]
+    except (IndexError, ValueError):
+        record = None
+    record_label = missing_record_label(collection_name, record)
+    return f"{field_label(field_name)} for {record_label}"
+
+
+def missing_record_label(collection_name, record):
+    if not isinstance(record, dict):
+        return COLLECTION_LABELS.get(collection_name, "this record")
+
+    label_keys = {
+        "provider_locations": ("display_name", "name", "location_name", "address"),
+        "licenses": ("type", "license_type", "license_number", "number"),
+        "specialties": ("name", "specialty"),
+        "education": ("institution_name", "institution", "education_type", "type"),
+        "liability_insurance": ("carrier_name", "policy_number", "insurance_type", "type"),
+        "payer_enrollments": ("payer_name", "name", "group_name", "practice_name"),
+    }
+    for key in label_keys.get(collection_name, ()):
+        value = record.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return COLLECTION_LABELS.get(collection_name, "this record")
+
+
+def field_label(field_name):
+    return FIELD_LABELS.get(field_name, field_name.replace("_", " "))
+
+
+def group_missing_field_display_label(field_path, group):
+    if field_path.startswith("group."):
+        return field_label(field_path.removeprefix("group."))
+    if field_path == "locations":
+        return GROUP_COLLECTION_LABELS["locations"]
+
+    collection_name, indexed_field = field_path.split("[", maxsplit=1)
+    index_text, field_name = indexed_field.split("].", maxsplit=1)
+    locations = group.get(collection_name) or []
+    try:
+        location = locations[int(index_text)]
+    except (IndexError, ValueError):
+        location = None
+    location_name = group_location_label(location)
+    return f"{field_label(field_name)} for {location_name or 'this practice location'}"
+
+
+def group_location_label(location):
+    """Use a readable address when older imports stored it in display_name."""
+    if not isinstance(location, dict):
+        return None
+    for field_name in ("display_name", "name", "location_name"):
+        value = location.get(field_name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    address = location.get("address") or location.get("display_name")
+    if isinstance(address, str) and address.strip():
+        return address.strip()
+    if isinstance(address, dict):
+        street = address.get("line1") or address.get("street") or address.get("address")
+        locality = ", ".join(
+            str(value) for value in (address.get("city"), address.get("state")) if value
+        )
+        return ", ".join(value for value in (street, locality) if value)
+    return None
 
 
 def calculate_provider_issues(provider_ref, provider):
+    revisions = provider_revisions(provider_ref)
     return (
-        discrepancy_issues(provider_ref)
-        + expiration_issues(provider_ref, provider)
-        + missing_data_issues(provider_ref, provider)
+        discrepancy_issues(revisions)
+        + expiration_issues(revisions, provider)
+        + missing_data_issues(revisions, provider)
     )
+
+
+def calculate_group_issues(group_ref, group):
+    revisions = provider_revisions(group_ref)
+    return discrepancy_issues(revisions) + group_missing_data_issues(group)

@@ -1,0 +1,83 @@
+# Build and deploy the Better Auth service separately from the FastAPI app.
+# Before running this file, create its Cloud Run runtime identity, Cloud SQL
+# PostgreSQL database, and the named Secret Manager versions.
+substitutions:
+  _REGION: us-east1
+  _SERVICE: cozema-auth
+  # The dedicated production Artifact Registry repository already provisioned
+  # in healthcare-credentialing-prod.
+  _REPOSITORY: credentialing
+  _RUNTIME_SERVICE_ACCOUNT: cozema-auth-runtime@healthcare-credentialing-prod.iam.gserviceaccount.com
+  _CLOUD_SQL_INSTANCE: healthcare-credentialing-prod:us-east1:cozema-auth-prod
+  _AUTH_URL: https://auth.cozemahealth.com
+  _APP_URL: https://app.cozemahealth.com
+
+# Build and deployment operations run as the existing least-privileged
+# production deployer, never as the default Compute Engine service account.
+serviceAccount: projects/$PROJECT_ID/serviceAccounts/credentialing-drive-deployer@$PROJECT_ID.iam.gserviceaccount.com
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  dynamic_substitutions: true
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - us-east1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/cozema-auth:$BUILD_ID
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - us-east1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/cozema-auth:$BUILD_ID
+  # Run schema changes over the Cloud SQL socket before exposing a new auth
+  # revision. Re-running this idempotent Better Auth migration is safe.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - deploy
+      - cozema-auth-migrate
+      - --image=us-east1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/cozema-auth:$BUILD_ID
+      - --region=${_REGION}
+      - --service-account=${_RUNTIME_SERVICE_ACCOUNT}
+      - --set-cloudsql-instances=${_CLOUD_SQL_INSTANCE}
+      - --command=npm
+      - --args=run,migrate
+      - --max-retries=0
+      - --task-timeout=10m
+      - --memory=1Gi
+      - --set-env-vars=NODE_ENV=production,BETTER_AUTH_URL=${_AUTH_URL},APP_URL=${_APP_URL},BETTER_AUTH_TRUSTED_ORIGINS=${_APP_URL},BETTER_AUTH_JWT_AUDIENCE=${_APP_URL},AUTH_EVENT_WEBHOOK_URL=${_APP_URL}/internal/auth-events
+      - --set-secrets=DATABASE_URL=better-auth-database-url:1,BETTER_AUTH_SECRET=better-auth-secret:1,RESEND_API_KEY=resend-api-key:1,GOOGLE_AUTH_CLIENT_ID=better-auth-google-client-id:1,GOOGLE_AUTH_CLIENT_SECRET=better-auth-google-client-secret:1,AUTH_EVENT_WEBHOOK_SECRET=auth-event-webhook-secret:1,EMAIL_FROM=better-auth-email-from:1
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - execute
+      - cozema-auth-migrate
+      - --region=${_REGION}
+      - --wait
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=us-east1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/cozema-auth:$BUILD_ID
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --service-account=${_RUNTIME_SERVICE_ACCOUNT}
+      - --add-cloudsql-instances=${_CLOUD_SQL_INSTANCE}
+      - --cpu=1
+      - --memory=512Mi
+      - --concurrency=40
+      - --max-instances=3
+      - --min-instances=1
+      - --set-env-vars=NODE_ENV=production,BETTER_AUTH_URL=${_AUTH_URL},APP_URL=${_APP_URL},BETTER_AUTH_TRUSTED_ORIGINS=${_APP_URL},BETTER_AUTH_JWT_AUDIENCE=${_APP_URL},AUTH_EVENT_WEBHOOK_URL=${_APP_URL}/internal/auth-events
+      - --set-secrets=DATABASE_URL=better-auth-database-url:1,BETTER_AUTH_SECRET=better-auth-secret:1,RESEND_API_KEY=resend-api-key:1,GOOGLE_AUTH_CLIENT_ID=better-auth-google-client-id:1,GOOGLE_AUTH_CLIENT_SECRET=better-auth-google-client-secret:1,AUTH_EVENT_WEBHOOK_SECRET=auth-event-webhook-secret:1,EMAIL_FROM=better-auth-email-from:1
+images:
+  - us-east1-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/cozema-auth:$BUILD_ID

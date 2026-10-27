@@ -4,17 +4,18 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#102a43">
-    <title>Practice Record | CredentialingHQ</title>
+    <title>Practice Record | Cozema Health</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:opsz,wght@5..120,600;5..120,700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=auth-foundation-20260926">
   </head>
   <body>
     <div class="record-shell">
       <header class="record-topbar">
         <a class="brand record-brand" href="/"><span class="brand-mark">C</span><span>Credentialing<span class="brand-accent">HQ</span></span></a>
-        <a class="back-link" href="/">← Back to overview</a>
+        <div class="record-actions"><div class="auth-controls" data-auth-controls hidden></div><a class="back-link" href="/">← Back to overview</a></div>
       </header>
       <main class="record-content">
         <div id="record-loading" class="record-loading"><span class="spinner"></span>Loading practice record...</div>
@@ -29,7 +30,7 @@
             </div>
           </section>
           <nav class="record-nav" aria-label="Practice record sections">
-            <a href="#profile">Practice profile</a><a href="#locations">Locations</a><a href="#w9">W-9 primary source</a>
+            <a href="#profile">Practice profile</a><a href="#locations">Locations</a><a href="#w9">W-9 primary source</a><a href="#issues">Open issues</a>
           </nav>
           <div class="record-grid">
             <div class="record-main">
@@ -47,12 +48,15 @@
               </section>
             </div>
             <aside class="record-aside">
+              <section class="aside-card"><p class="eyebrow">Audit trail</p><h2>Revision history</h2><p class="aside-caption">Review the documents and fields that shaped this practice record.</p><a id="practice-activity-link" class="record-audit-link" href="#">View revision history →</a></section>
               <section class="aside-card"><p class="eyebrow">At a glance</p><div class="summary-list" id="summary-list"></div></section>
+              <section class="aside-card" id="issues"><p class="eyebrow">Record integrity</p><h2>Open issues</h2><div class="issue-stack" id="practice-issue-list"></div></section>
             </aside>
           </div>
         </div>
       </main>
     </div>
-    <script src="/static/practice.js"></script>
+    <script type="module" src="/static/auth.js?v=clerk-20260927"></script>
+    <script src="/static/practice.js?v=record-activity-20260923"></script>
   </body>
 </html>

@@ -1,0 +1,19 @@
+{
+  "name": "cozema-health-auth-service",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js",
+    "migrate": "auth migrate --config ./src/auth.js --yes"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.0",
+    "auth": "1.7.7",
+    "better-auth": "^1.7.7",
+    "dotenv": "^16.6.1",
+    "hono": "^4.10.0",
+    "pg": "^8.16.3"
+  }
+}

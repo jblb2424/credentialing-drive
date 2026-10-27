@@ -20,10 +20,11 @@ const elements = {
   payers: document.querySelector("#payer-list"),
   issues: document.querySelector("#issue-list"),
   summary: document.querySelector("#summary-list"),
+  activityLink: document.querySelector("#provider-activity-link"),
 };
 
 function escapeHtml(value) {
-  return String(value ?? "Not yet captured")
+  return String(value ?? "Field value not captured")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -31,9 +32,9 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function value(value) {
-  if (value === null || value === undefined || value === "") return "Not yet captured";
-  if (typeof value === "object") return formatAddress(value) || "Not yet captured";
+function value(value, fieldLabel = "Field value") {
+  if (value === null || value === undefined || value === "") return `${fieldLabel} not captured`;
+  if (typeof value === "object") return formatAddress(value) || `${fieldLabel} not captured`;
   return String(value);
 }
 
@@ -42,6 +43,21 @@ function firstAvailable(object, keys) {
     if (object?.[key] !== null && object?.[key] !== undefined && object[key] !== "") return object[key];
   }
   return null;
+}
+
+function expirationState(rawDate) {
+  if (!rawDate) return null;
+  const value = String(rawDate);
+  const expirationDate = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00` : value);
+  if (Number.isNaN(expirationDate.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  expirationDate.setHours(0, 0, 0, 0);
+  return expirationDate < today ? "expired" : null;
+}
+
+function expirationBadge(rawDate) {
+  return expirationState(rawDate) === "expired" ? '<span class="expiration-badge">Expired</span>' : "";
 }
 
 function formatAddress(address) {
@@ -77,13 +93,17 @@ function humanize(value) {
 }
 
 function issueLabel(issue) {
-  const field = humanize((issue.affected_fields || []).join(", "));
+  const field = issue.display_label || humanize((issue.affected_fields || []).join(", "));
   const credential = issue.credential_label || field || "Credential";
   if (issue.type === "expiring") return `${credential} expires in ${issue.days_until_expiration} days`;
   if (issue.type === "expired") return `${credential} is expired`;
   if (issue.type === "missing_data") return `Missing ${field || "critical provider data"}`;
   if (issue.type === "discrepancy") return `Conflicting ${field || "provider information"}`;
   return humanize(issue.type) || "Record needs review";
+}
+
+function issueTypeLabel(issue) {
+  return String(issue.type || "review").replaceAll("_", " ");
 }
 
 function emptyCard(message) {
@@ -106,8 +126,8 @@ function renderIdentity(provider) {
     ["NPI", profile.npi],
     ["CAQH ID", firstAvailable(profile, ["caqh_id", "caqh"])],
   ];
-  elements.identity.innerHTML = fields.map(([label, fieldValue]) => `<div class="data-field"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value(fieldValue))}</strong></div>`).join("");
-  elements.address.textContent = value(firstAvailable(profile, ["address", "provider_address"]));
+  elements.identity.innerHTML = fields.map(([label, fieldValue]) => `<div class="data-field"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value(fieldValue, label))}</strong></div>`).join("");
+  elements.address.textContent = value(firstAvailable(profile, ["address", "provider_address"]), "Provider address");
 }
 
 function providerLocations(provider) {
@@ -130,7 +150,7 @@ function renderLocations(provider) {
     const locationData = typeof location === "object" ? location : { display_name: location };
     const title = firstAvailable(locationData, ["display_name", "name", "location_name"]);
     const details = formatAddress(locationData.address) || firstAvailable(locationData, ["phone", "email"]);
-    return `<article class="location-card"><span class="location-type">${escapeHtml(value(locationData.type || "Practice location"))}</span><h3>${escapeHtml(value(title))}</h3><p>${escapeHtml(value(details))}</p>${locationData.practice_name ? `<span class="practice-note">${escapeHtml(locationData.practice_name)}</span>` : ""}</article>`;
+    return `<article class="location-card"><span class="location-type">${escapeHtml(value(locationData.type, "Location type"))}</span><h3>${escapeHtml(value(title, "Location name"))}</h3><p>${escapeHtml(value(details, "Location contact details"))}</p>${locationData.practice_name ? `<span class="practice-note">${escapeHtml(locationData.practice_name)}</span>` : ""}</article>`;
   }).join("");
 }
 
@@ -142,7 +162,9 @@ function renderLicenses(provider) {
   }
   elements.licenses.innerHTML = licenses.map((license) => {
     const item = typeof license === "object" ? license : { type: license };
-    return `<tr><td>${escapeHtml(value(firstAvailable(item, ["type", "license_type"])))}</td><td>${escapeHtml(value(firstAvailable(item, ["license_number", "number"])))}</td><td>${escapeHtml(value(firstAvailable(item, ["state", "issued_state"])))}</td><td>${escapeHtml(value(firstAvailable(item, ["issue_date", "issued_date"])))}</td><td>${escapeHtml(value(firstAvailable(item, ["expiration_date", "expires_at"])))}</td></tr>`;
+    const expiration = firstAvailable(item, ["expiration_date", "expires_at", "expiry_date"]);
+    const state = expirationState(expiration);
+    return `<tr class="${state ? `is-${state}` : ""}"><td>${escapeHtml(value(firstAvailable(item, ["type", "license_type"]), "License type"))}</td><td>${escapeHtml(value(firstAvailable(item, ["license_number", "number"]), "License number"))}</td><td>${escapeHtml(value(firstAvailable(item, ["state", "issued_state"]), "License state"))}</td><td>${escapeHtml(value(firstAvailable(item, ["issue_date", "issued_date"]), "License issue date"))}</td><td class="${state ? `expiration-date is-${state}` : ""}">${escapeHtml(value(expiration, "License expiration date"))}${expirationBadge(expiration)}</td></tr>`;
   }).join("");
 }
 
@@ -155,7 +177,9 @@ function renderSpecialties(provider) {
   elements.specialties.innerHTML = specialties.map((specialty) => {
     const item = typeof specialty === "object" ? specialty : { name: specialty };
     const certified = firstAvailable(item, ["board_certified", "is_board_certified"]);
-    return `<article class="certification-card"><p>${escapeHtml(value(firstAvailable(item, ["name", "specialty"])))}</p><strong>${certified === true || String(certified).toLowerCase() === "yes" ? "Board certified" : "Board status not captured"}</strong><dl><div><dt>Board</dt><dd>${escapeHtml(value(firstAvailable(item, ["certifying_board", "board"])))}</dd></div><div><dt>Certified</dt><dd>${escapeHtml(value(firstAvailable(item, ["certification_date", "certified_date"])))}</dd></div><div><dt>Expires</dt><dd>${escapeHtml(value(firstAvailable(item, ["expiration_date", "expires_at"])))}</dd></div></dl></article>`;
+    const expiration = firstAvailable(item, ["expiration_date", "expires_at", "board_expiration_date"]);
+    const state = expirationState(expiration);
+    return `<article class="certification-card ${state ? `is-${state}` : ""}"><p>${escapeHtml(value(firstAvailable(item, ["name", "specialty"]), "Specialty"))}</p>${expirationBadge(expiration)}<strong>${certified === true || String(certified).toLowerCase() === "yes" ? "Board certified" : "Board certification status not captured"}</strong><dl><div><dt>Board</dt><dd>${escapeHtml(value(firstAvailable(item, ["certifying_board", "board"]), "Certifying board"))}</dd></div><div><dt>Certified</dt><dd>${escapeHtml(value(firstAvailable(item, ["certification_date", "certified_date"]), "Certification date"))}</dd></div><div><dt>Expires</dt><dd class="${state ? `expiration-date is-${state}` : ""}">${escapeHtml(value(expiration, "Certification expiration date"))}</dd></div></dl></article>`;
   }).join("");
 }
 
@@ -167,7 +191,7 @@ function renderEducation(provider) {
   }
   elements.education.innerHTML = education.map((entry) => {
     const item = typeof entry === "object" ? entry : { institution_name: entry };
-    return `<article class="timeline-item"><span></span><div><p>${escapeHtml(value(firstAvailable(item, ["education_type", "type"])))}</p><h3>${escapeHtml(value(firstAvailable(item, ["institution_name", "institution"])))}</h3><div class="timeline-meta">${escapeHtml(value(firstAvailable(item, ["degree", "degree_received"]))) }${item.specialty ? ` · ${escapeHtml(item.specialty)}` : ""}</div></div></article>`;
+    return `<article class="timeline-item"><span></span><div><p>${escapeHtml(value(firstAvailable(item, ["education_type", "type"]), "Education type"))}</p><h3>${escapeHtml(value(firstAvailable(item, ["institution_name", "institution"]), "Institution name"))}</h3><div class="timeline-meta">${escapeHtml(value(firstAvailable(item, ["degree", "degree_received"]), "Degree")) }${item.specialty ? ` · ${escapeHtml(item.specialty)}` : ""}</div></div></article>`;
   }).join("");
 }
 
@@ -179,7 +203,9 @@ function renderInsurance(provider) {
   }
   elements.insurance.innerHTML = insurance.map((policy) => {
     const item = typeof policy === "object" ? policy : { insurance_type: policy };
-    return `<article class="coverage-card"><p>${escapeHtml(value(firstAvailable(item, ["insurance_type", "type"])))}</p><h3>${escapeHtml(value(item.carrier_name))}</h3><div class="coverage-row"><span>Policy #</span><strong>${escapeHtml(value(item.policy_number))}</strong></div><div class="coverage-row"><span>Coverage period</span><strong>${escapeHtml(value(item.effective_date))} – ${escapeHtml(value(item.expiration_date))}</strong></div><div class="coverage-row"><span>Claim / aggregate</span><strong>${escapeHtml(value(item.claim_amount))} / ${escapeHtml(value(item.aggregate_amount))}</strong></div></article>`;
+    const expiration = firstAvailable(item, ["expiration_date", "expires_at", "policy_expiration_date"]);
+    const state = expirationState(expiration);
+    return `<article class="coverage-card ${state ? `is-${state}` : ""}"><p>${escapeHtml(value(firstAvailable(item, ["insurance_type", "type"]), "Insurance type"))}</p>${expirationBadge(expiration)}<h3>${escapeHtml(value(item.carrier_name, "Insurance carrier"))}</h3><div class="coverage-row"><span>Policy #</span><strong>${escapeHtml(value(item.policy_number, "Policy number"))}</strong></div><div class="coverage-row"><span>Coverage period</span><strong class="${state ? `expiration-date is-${state}` : ""}">${escapeHtml(value(item.effective_date, "Policy effective date"))} – ${escapeHtml(value(expiration, "Policy expiration date"))}</strong></div><div class="coverage-row"><span>Claim / aggregate</span><strong>${escapeHtml(value(item.claim_amount, "Claim amount"))} / ${escapeHtml(value(item.aggregate_amount, "Aggregate amount"))}</strong></div></article>`;
   }).join("");
 }
 
@@ -202,7 +228,7 @@ function renderPayers(provider) {
   }
   elements.payers.innerHTML = enrollments.map((enrollment) => {
     const locations = (enrollment.locations || enrollment.location_names || []).map(locationLabel).filter(Boolean).join(", ");
-    return `<tr><td class="payer-name"><strong>${escapeHtml(value(enrollment.payer_name || enrollment.name))}</strong><span class="table-note">${escapeHtml(enrollment.source || "Provider")}</span></td><td>${escapeHtml(value(enrollment.group_name || enrollment.practice_name))}</td><td>${escapeHtml(value(locations))}</td><td class="payer-status"><span class="enrollment-status">${escapeHtml(humanize(enrollment.status || enrollment.enrollment_status || "unknown"))}</span></td></tr>`;
+    return `<tr><td class="payer-name"><strong>${escapeHtml(value(enrollment.payer_name || enrollment.name, "Payer name"))}</strong><span class="table-note">${escapeHtml(enrollment.source || "Provider")}</span></td><td>${escapeHtml(value(enrollment.group_name || enrollment.practice_name, "Practice"))}</td><td>${escapeHtml(value(locations, "Participating locations"))}</td><td class="payer-status"><span class="enrollment-status">${escapeHtml(humanize(enrollment.status || enrollment.enrollment_status || "unknown"))}</span></td></tr>`;
   }).join("");
 }
 
@@ -213,7 +239,7 @@ function renderIssues(provider) {
     elements.issues.innerHTML = '<p class="aside-empty">No outstanding issues on this record.</p>';
     return;
   }
-  elements.issues.innerHTML = issues.map((issue) => `<a class="record-issue" href="/providers/${encodeURIComponent(provider.id)}/issues/${encodeURIComponent(issue.id)}/view?entity=${entityId}"><p>${escapeHtml(issueLabel(issue))}</p><span class="severity-tag severity-${escapeHtml(issue.severity || "low")}">${escapeHtml(issue.severity || "review")}</span><span class="issue-link">View issue →</span></a>`).join("");
+  elements.issues.innerHTML = issues.map((issue) => `<a class="record-issue ${issue.type === "expired" ? "is-expired" : ""}" href="/providers/${encodeURIComponent(provider.id)}/issues/${encodeURIComponent(issue.id)}/view?entity=${entityId}"><p>${escapeHtml(issueLabel(issue))}</p><span class="issue-tags"><span class="severity-tag severity-${escapeHtml(issue.severity || "low")}">${escapeHtml(issue.severity || "review")}</span><span class="issue-type-tag issue-type-${escapeHtml(issue.type || "review")}">${escapeHtml(issueTypeLabel(issue))}</span></span><span class="issue-link">View issue →</span></a>`).join("");
 }
 
 function renderSummary(provider) {
@@ -223,7 +249,7 @@ function renderSummary(provider) {
     ["Practices", affiliations.length],
     ["Locations", locations.length],
   ];
-  elements.summary.innerHTML = rows.map(([label, summaryValue]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value(summaryValue))}</strong></div>`).join("");
+  elements.summary.innerHTML = rows.map(([label, summaryValue]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value(summaryValue, label))}</strong></div>`).join("");
 }
 
 async function loadRecord() {
@@ -241,6 +267,7 @@ async function loadRecord() {
   elements.crumbProvider.textContent = name;
   elements.name.textContent = name;
   elements.subtitle.textContent = [profile.credentials || profile.provider_type, profile.npi ? `NPI ${profile.npi}` : null].filter(Boolean).join(" · ") || "Credentialing profile";
+  elements.activityLink.href = `/activity/view?entity=${encodeURIComponent(entityId)}&record_type=provider&record_id=${encodeURIComponent(provider.id)}`;
   renderIdentity(provider);
   renderLocations(provider);
   renderLicenses(provider);

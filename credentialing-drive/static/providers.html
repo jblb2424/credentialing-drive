@@ -4,11 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#102a43">
-    <title>Providers | CredentialingHQ</title>
+    <title>Providers | Cozema Health</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:opsz,wght@5..120,600;5..120,700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=auth-foundation-20260926">
   </head>
   <body>
     <div class="app-shell">
@@ -18,23 +19,23 @@
         <nav class="main-nav" aria-label="Primary navigation">
           <a href="/"><span class="nav-icon">▦</span>Overview</a>
           <a class="active" href="/providers/view?entity=dummy-client"><span class="nav-icon">◉</span>Providers</a>
-          <a href="/enrollment/view?entity=dummy-client"><span class="nav-icon">↔</span>Enrollment</a>
           <a href="/expirations/view?entity=dummy-client"><span class="nav-icon">◷</span>Expirations</a>
-          <a href="/tasks/view?entity=dummy-client"><span class="nav-icon">✓</span>Tasks</a>
+          <a href="/activity/view?entity=dummy-client"><span class="nav-icon">◌</span>Activity</a>
           <a href="/reports/view?entity=dummy-client"><span class="nav-icon">▤</span>Reports</a>
           <a href="/settings/view?entity=dummy-client"><span class="nav-icon">⚙</span>Settings</a>
         </nav>
         <div class="sidebar-footer"><p>Data refreshes from your connected credentialing workspace.</p></div>
       </aside>
       <main class="workspace-content">
-        <header class="topbar"><div class="mobile-brand">Credentialing<span>HQ</span></div><div class="status-line"><span class="live-dot"></span>Live data</div></header>
+        <header class="topbar"><div class="mobile-brand">Credentialing<span>HQ</span></div><div class="status-line"><span class="live-dot"></span>Live data</div><div class="auth-controls" data-auth-controls hidden></div></header>
         <section class="workspace-hero"><p class="eyebrow">Provider directory</p><h1>Providers</h1><p class="lede">Search and open provider records without crowding your client overview.</p></section>
         <section class="workspace-panel">
-          <div class="section-heading"><div><p class="eyebrow">All providers</p><h2><span id="provider-count">--</span> provider records</h2></div><label class="search-field" for="provider-search"><span>⌕</span><input id="provider-search" type="search" placeholder="Search name, NPI, credentials"></label></div>
-          <div class="provider-table-wrap"><table class="provider-table"><thead><tr><th>Provider</th><th>NPI</th><th>Credentials</th><th>Record health</th><th aria-label="Open record"></th></tr></thead><tbody id="provider-table-body"><tr><td colspan="5" class="record-table-empty">Loading provider directory...</td></tr></tbody></table></div>
+          <div class="section-heading"><div><p class="eyebrow">All providers</p><h2><span id="provider-count" class="inline-count is-loading" aria-busy="true"><span class="loading-skeleton" aria-hidden="true"></span><span class="sr-only">Loading provider count</span></span> provider records</h2></div><label class="search-field" for="provider-search"><span>⌕</span><input id="provider-search" type="search" placeholder="Search name, NPI, credentials"></label></div>
+          <div class="provider-table-wrap"><table class="provider-table"><thead><tr><th>Provider</th><th>NPI</th><th>Credentials</th><th>Record health</th><th aria-label="Open record"></th></tr></thead><tbody id="provider-table-body"><tr><td colspan="5" class="record-table-empty"><span class="loading-inline"><span class="spinner"></span>Loading provider directory...</span></td></tr></tbody></table></div>
         </section>
       </main>
     </div>
-    <script src="/static/providers.js"></script>
+    <script type="module" src="/static/auth.js?v=clerk-20260927"></script>
+    <script src="/static/providers.js?v=ui-polish-20260921"></script>
   </body>
 </html>

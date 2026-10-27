@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#102a43">
+    <title>Reports | Cozema Health</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:opsz,wght@5..120,600;5..120,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css?v=auth-foundation-20260926">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="/"><span class="brand-mark">C</span><span>Credentialing<span class="brand-accent">HQ</span></span></a>
+        <p class="workspace-label">Workspace</p>
+        <nav class="main-nav" aria-label="Primary navigation">
+          <a href="/"><span class="nav-icon">▦</span>Overview</a>
+          <a href="/providers/view?entity=dummy-client"><span class="nav-icon">◉</span>Providers</a>
+          <a href="/expirations/view?entity=dummy-client"><span class="nav-icon">◷</span>Expirations</a>
+          <a href="/activity/view?entity=dummy-client"><span class="nav-icon">◌</span>Activity</a>
+          <a class="active" href="/reports/view?entity=dummy-client"><span class="nav-icon">▤</span>Reports</a>
+          <a href="/settings/view?entity=dummy-client"><span class="nav-icon">⚙</span>Settings</a>
+        </nav>
+        <div class="sidebar-footer"><p>Data refreshes from your connected credentialing workspace.</p></div>
+      </aside>
+      <main class="workspace-content reports-content">
+        <header class="topbar"><div class="mobile-brand">Credentialing<span>HQ</span></div><div class="status-line"><span class="live-dot"></span>Live data</div><div class="auth-controls" data-auth-controls hidden></div></header>
+        <section class="workspace-hero reports-hero">
+          <p class="eyebrow">Operational reporting</p>
+          <h1>Create a report.</h1>
+          <p class="lede">Choose a focused report, refine its scope, preview the live data, and export a CSV when it is ready to share.</p>
+        </section>
+        <section class="report-template-section" aria-labelledby="report-template-title">
+          <div class="section-heading"><div><p class="eyebrow">Report templates</p><h2 id="report-template-title">What do you need to review?</h2></div></div>
+          <div class="report-templates" id="report-templates"><div class="loading-row"><span class="spinner"></span>Loading report templates...</div></div>
+        </section>
+        <section class="workspace-panel report-builder" aria-labelledby="report-builder-title">
+          <div class="section-heading"><div><p class="eyebrow">Report builder</p><h2 id="report-builder-title">Set the scope</h2></div><button id="export-report" class="secondary-button" type="button" disabled>Export CSV <span>↓</span></button></div>
+          <p class="workspace-caption" id="report-description">Select a report template to begin.</p>
+          <form id="report-form" class="report-filters">
+            <label>Report type<select id="report-type" name="report_type" required></select></label>
+            <label>Practice<select id="practice-id" name="practice_id"><option value="">All practices</option></select></label>
+            <label>Provider<select id="provider-id" name="provider_id"><option value="">All providers</option></select></label>
+            <label>Issue type<select id="issue-type" name="issue_type"><option value="">All issue types</option><option value="missing_data">Missing data</option><option value="discrepancy">Discrepancy</option><option value="expired">Expired</option><option value="expiring">Expiring soon</option></select></label>
+            <label>Expiration status<select id="expiration-status" name="expiration_status"><option value="">All expiration statuses</option><option value="expiring">Expiring soon</option><option value="expired">Expired</option></select></label>
+            <button class="primary-button" type="submit">Preview report <span>→</span></button>
+          </form>
+          <p class="report-note">Exports are generated on demand and are not stored by this application.</p>
+        </section>
+        <section class="workspace-panel report-preview" aria-live="polite" aria-labelledby="report-preview-title">
+          <div class="section-heading"><div><p class="eyebrow">Live preview</p><h2 id="report-preview-title">Preparing report</h2></div><span class="report-row-count is-loading" id="report-row-count" aria-busy="true"><span class="loading-skeleton" aria-hidden="true"></span><span class="sr-only">Loading report preview</span></span></div>
+          <div class="provider-table-wrap"><table class="provider-table report-table"><thead id="report-table-head"></thead><tbody id="report-table-body"><tr><td class="record-table-empty">Select a report template and preview its data.</td></tr></tbody></table></div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/static/auth.js?v=clerk-20260927"></script>
+    <script src="/static/reports.js?v=ui-polish-20260921"></script>
+  </body>
+</html>

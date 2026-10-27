@@ -4,32 +4,34 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#102a43">
-    <title>Credentialing Issue | CredentialingHQ</title>
+    <title>Credentialing Issue | Cozema Health</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:opsz,wght@5..120,600;5..120,700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=auth-foundation-20260926">
   </head>
   <body>
     <div class="record-shell">
       <header class="record-topbar">
         <a class="brand record-brand" href="/"><span class="brand-mark">C</span><span>Credentialing<span class="brand-accent">HQ</span></span></a>
-        <a class="back-link" id="back-to-provider" href="/">← Back to provider</a>
+        <div class="record-actions"><div class="auth-controls" data-auth-controls hidden></div><a class="back-link" id="back-to-provider" href="/">← Back to record</a></div>
       </header>
       <main class="issue-page">
         <div id="issue-loading" class="record-loading"><span class="spinner"></span>Loading issue...</div>
         <div id="issue-error" class="record-error" hidden></div>
         <div id="issue-content" hidden>
-          <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">Dashboard</a><span>/</span><a id="issue-provider-link" href="/">Provider</a><span>/</span><strong>Issue</strong></nav>
-          <section class="issue-hero"><p class="eyebrow">Credentialing issue</p><div><h1 id="issue-title">Issue</h1><span id="issue-severity" class="severity-tag"></span></div><p id="issue-description" class="lede"></p></section>
+          <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">Dashboard</a><span>/</span><a id="issue-provider-link" href="/">Record</a><span>/</span><strong>Issue</strong></nav>
+          <section class="issue-hero"><p class="eyebrow">Credentialing issue</p><div><h1 id="issue-title">Issue</h1><span id="issue-severity" class="severity-tag"></span><span id="issue-type" class="issue-type-tag"></span></div><p id="issue-description" class="lede"></p></section>
           <section class="issue-summary" id="issue-summary"></section>
           <div class="issue-grid">
             <section class="record-section"><div class="section-title"><div><p class="eyebrow">Investigation</p><h2>Issue details</h2></div><span class="section-marker">01</span></div><dl class="issue-details" id="issue-details"></dl></section>
-            <aside class="aside-card"><p class="eyebrow">Next action</p><h2 id="next-action-title">Review the record</h2><p class="issue-action" id="next-action"></p><a id="issue-provider-action" class="back-link" href="/">Open provider record →</a></aside>
+            <aside class="aside-card"><p class="eyebrow">Next action</p><h2 id="next-action-title">Review the record</h2><p class="issue-action" id="next-action"></p><a id="issue-provider-action" class="back-link" href="/">Open record →</a></aside>
           </div>
         </div>
       </main>
     </div>
-    <script src="/static/issue.js"></script>
+    <script type="module" src="/static/auth.js?v=clerk-20260927"></script>
+    <script src="/static/issue.js?v=group-issues-20260922"></script>
   </body>
 </html>

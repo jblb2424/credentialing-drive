@@ -1,0 +1,38 @@
+{
+  "displayName": "Production: Cloud Run 5xx responses",
+  "documentation": {
+    "content": "The production Cozema Health Cloud Run service returned a server error. Check the request log and the active revision before considering rollback.",
+    "mimeType": "text/markdown"
+  },
+  "userLabels": {
+    "environment": "production",
+    "component": "cloud-run"
+  },
+  "conditions": [
+    {
+      "displayName": "Any 5xx response from credentialing-drive",
+      "conditionThreshold": {
+        "filter": "metric.type=\"run.googleapis.com/request_count\" resource.type=\"cloud_run_revision\" resource.label.\"service_name\"=\"credentialing-drive\" metric.label.\"response_code_class\"=\"5xx\"",
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "60s",
+        "aggregations": [
+          {
+            "alignmentPeriod": "60s",
+            "perSeriesAligner": "ALIGN_SUM"
+          }
+        ],
+        "trigger": {
+          "count": 1
+        }
+      }
+    }
+  ],
+  "combiner": "OR",
+  "notificationChannels": [
+    "projects/healthcare-credentialing-prod/notificationChannels/11678299693917119849"
+  ],
+  "alertStrategy": {
+    "autoClose": "1800s"
+  }
+}

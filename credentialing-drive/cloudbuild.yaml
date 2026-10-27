@@ -5,7 +5,7 @@ substitutions:
 
 steps:
   - name: gcr.io/cloud-builders/docker
-    dir: credentialing-drive
+    dir: .
     args:
       - build
       - --tag=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$BUILD_ID
@@ -24,6 +24,13 @@ steps:
       - --region=${_REGION}
       - --platform=managed
       - --allow-unauthenticated
+      # Development Clerk keys are injected from Secret Manager during the
+      # testing rollout. Replace these secret versions with production Clerk
+      # keys when the production Clerk instance is ready.
+      - --update-secrets=CLERK_PUBLISHABLE_KEY=credentialing-drive-clerk-publishable-key:latest,CLERK_SECRET_KEY=credentialing-drive-clerk-secret-key:latest
+      # Clerk's test-instance session tokens may omit the azp claim. The app
+      # permits this only while the injected secret is an sk_test_ key.
+      - --update-env-vars=GCP_PROJECT_ID=$PROJECT_ID,FIRESTORE_DATABASE=credentialing-drive,CLOUD_TASKS_LOCATION=us-east1,CLOUD_TASKS_QUEUE=drive-document-processing,TASK_PROCESSOR_URL=https://credentialing-drive-iaq2ujb3ya-ue.a.run.app/tasks/process-drive-file,TASK_INVOKER_SERVICE_ACCOUNT=credentialing-drive-tasks@$PROJECT_ID.iam.gserviceaccount.com,DOCUMENT_AI_LOCATION=us,DOCUMENT_AI_PROCESSOR_ID=302b5ee22c4f448f,DRIVE_WATCH_RENEWAL_SERVICE_ACCOUNT=credentialing-drive-scheduler@$PROJECT_ID.iam.gserviceaccount.com,DRIVE_WATCH_RENEWAL_AUDIENCE=https://credentialing-drive-iaq2ujb3ya-ue.a.run.app,CLERK_AUTHORIZED_PARTIES=https://credentialing-drive-iaq2ujb3ya-ue.a.run.app,CLERK_ALLOW_MISSING_AZP=true,APP_BASE_URL=https://credentialing-drive-iaq2ujb3ya-ue.a.run.app,GOOGLE_REDIRECT_URI=https://credentialing-drive-iaq2ujb3ya-ue.a.run.app/oauth/google/callback,GOOGLE_DRIVE_WEBHOOK_URL=https://credentialing-drive-iaq2ujb3ya-ue.a.run.app/webhooks/google-drive
 
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$BUILD_ID

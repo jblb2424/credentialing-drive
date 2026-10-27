@@ -5,10 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#102a43">
     <title>Credentialing Operations</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Playfair+Display:opsz,wght@5..120,600;5..120,700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/styles.css?v=20260917c">
+    <link rel="stylesheet" href="/static/styles.css?v=auth-foundation-20260926">
   </head>
   <body>
     <div class="app-shell">
@@ -21,9 +22,8 @@
         <nav class="main-nav" aria-label="Primary navigation">
           <a class="active" href="/"><span class="nav-icon">▦</span>Overview</a>
           <a href="/providers/view?entity=dummy-client"><span class="nav-icon">◉</span>Providers</a>
-          <a href="/enrollment/view?entity=dummy-client"><span class="nav-icon">↔</span>Enrollment</a>
           <a href="/expirations/view?entity=dummy-client"><span class="nav-icon">◷</span>Expirations</a>
-          <a href="/tasks/view?entity=dummy-client"><span class="nav-icon">✓</span>Tasks</a>
+          <a href="/activity/view?entity=dummy-client"><span class="nav-icon">◌</span>Activity</a>
           <a href="/reports/view?entity=dummy-client"><span class="nav-icon">▤</span>Reports</a>
           <a href="/settings/view?entity=dummy-client"><span class="nav-icon">⚙</span>Settings</a>
         </nav>
@@ -36,34 +36,35 @@
         <header class="topbar">
           <div class="mobile-brand">Credentialing<span>HQ</span></div>
           <div class="status-line"><span class="live-dot"></span>Live data</div>
+          <div class="auth-controls" data-auth-controls hidden></div>
           <button class="refresh-button" id="refresh-button" type="button">Refresh data <span>↻</span></button>
         </header>
 
         <section class="hero" id="overview">
           <p class="eyebrow">Credentialing overview</p>
-          <h1>Good morning, <span id="entity-name">team</span>.</h1>
-          <p class="lede">Keep enrollment moving by resolving the provider records that need attention first.</p>
+          <h1 id="dashboard-greeting">Good morning</h1>
+          <p class="lede">Keep enrollment moving by resolving the credentialing records that need attention first.</p>
         </section>
 
         <section class="metrics" aria-label="Credentialing summary">
           <a class="metric-card metric-link" href="/practices/view?entity=dummy-client">
             <p>Practices</p>
-            <strong id="group-count">--</strong>
+            <strong id="group-count" class="is-loading" aria-busy="true"><span class="loading-skeleton loading-skeleton-metric" aria-hidden="true"></span><span class="sr-only">Loading practice count</span></strong>
             <span>Browse all practices <b>→</b></span>
           </a>
           <a class="metric-card metric-link metric-primary" href="/providers/view?entity=dummy-client">
             <p>Provider records</p>
-            <strong id="provider-count">--</strong>
-            <span id="provider-support">Loading provider directory</span>
+            <strong id="provider-count" class="is-loading" aria-busy="true"><span class="loading-skeleton loading-skeleton-metric" aria-hidden="true"></span><span class="sr-only">Loading provider count</span></strong>
+            <span id="provider-support" class="metric-support-loading"><span class="loading-skeleton loading-skeleton-support" aria-hidden="true"></span><span class="sr-only">Loading provider directory</span></span>
           </a>
-          <a class="metric-card metric-link metric-issue" href="/issues/view?entity=dummy-client">
+          <a class="metric-card metric-link metric-issue" href="/issues/view?entity=dummy-client&amp;view=issue-filter-20260923">
             <p>Open issues</p>
-            <strong id="issue-count">--</strong>
+            <strong id="issue-count" class="is-loading" aria-busy="true"><span class="loading-skeleton loading-skeleton-metric" aria-hidden="true"></span><span class="sr-only">Loading issue count</span></strong>
             <span>Review all outstanding issues <b>→</b></span>
           </a>
           <a class="metric-card metric-link metric-warning" href="/expirations/view?entity=dummy-client&amp;status=expiring">
             <p>Credentials expiring soon</p>
-            <strong id="expiring-count">--</strong>
+            <strong id="expiring-count" class="is-loading" aria-busy="true"><span class="loading-skeleton loading-skeleton-metric" aria-hidden="true"></span><span class="sr-only">Loading expiring credential count</span></strong>
             <span>Within the next 90 days <b>→</b></span>
           </a>
         </section>
@@ -74,21 +75,22 @@
               <p class="eyebrow">Priority work</p>
               <h2>Attention required</h2>
             </div>
-          <a href="/providers/view?entity=dummy-client">View provider directory <span>→</span></a>
+          <a href="/issues/view?entity=dummy-client&amp;severity=critical&amp;view=priority-tiers-20260923">Review critical issues <span>→</span></a>
           </div>
           <div class="attention-list" id="attention-list" aria-live="polite">
-            <div class="loading-row"><span class="spinner"></span>Reviewing current provider records...</div>
+            <div class="loading-row"><span class="spinner"></span>Reviewing current credentialing records...</div>
           </div>
         </section>
 
         <section class="groups-section" id="groups">
           <p class="eyebrow">Connected practices</p>
-          <div class="group-list" id="group-list"></div>
+          <div class="group-list" id="group-list"><div class="loading-inline"><span class="spinner"></span>Loading practices...</div></div>
         </section>
       </main>
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="/static/dashboard.js?v=20260917b"></script>
+    <script type="module" src="/static/auth.js?v=clerk-20260927"></script>
+    <script src="/static/dashboard.js?v=priority-tiers-20260923"></script>
   </body>
 </html>
