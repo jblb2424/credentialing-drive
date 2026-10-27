@@ -13,7 +13,7 @@ substitutions:
   _GOOGLE_DRIVE_WEBHOOK_URL: https://app.cozemahealth.com/webhooks/google-drive
   # Google-issued OIDC tokens for Cloud Tasks and Cloud Scheduler must target
   # Cloud Run's canonical audience, rather than the browser-facing custom domain.
-  _INTERNAL_SERVICE_URL: https://credentialing-drive-iaq2ujb3ya-ue.a.run.app
+  _INTERNAL_SERVICE_URL: https://credentialing-drive-focv4xemnq-ue.a.run.app
   _DRIVE_WATCH_OWNER: cloud
   _BETTER_AUTH_URL: https://auth.cozemahealth.com
   _BETTER_AUTH_JWT_AUDIENCE: https://app.cozemahealth.com
