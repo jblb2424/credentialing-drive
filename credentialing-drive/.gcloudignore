@@ -6,6 +6,7 @@
 **/*.py[cod]
 .env
 .env.*
+.venv/
 react-dashboard/node_modules/
 react-dashboard/dist/
 auth-service/node_modules/
