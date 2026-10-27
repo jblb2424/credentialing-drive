@@ -19,7 +19,7 @@ def generate_gemini_json(contents):
         location=os.environ.get("VERTEX_AI_LOCATION", "global"),
     )
     response = client.models.generate_content(
-        model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+        model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
         contents=contents,
         config={"response_mime_type": "application/json", "temperature": 0},
     )
@@ -29,7 +29,7 @@ def generate_gemini_json(contents):
 def reconcile_provider_records_with_gemini(candidates):
     """Run a fresh, purpose-specific model pass over existing provider records."""
     model = os.environ.get(
-        "GEMINI_RECONCILIATION_MODEL", os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+        "GEMINI_RECONCILIATION_MODEL", os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
     )
     client = genai.Client(
         vertexai=True,
