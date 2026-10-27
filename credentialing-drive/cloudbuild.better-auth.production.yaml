@@ -11,6 +11,10 @@ substitutions:
   _APP_BASE_URL: https://app.cozemahealth.com
   _GOOGLE_REDIRECT_URI: https://app.cozemahealth.com/oauth/google/callback
   _GOOGLE_DRIVE_WEBHOOK_URL: https://app.cozemahealth.com/webhooks/google-drive
+  # Google-issued OIDC tokens for Cloud Tasks and Cloud Scheduler must target
+  # Cloud Run's canonical audience, rather than the browser-facing custom domain.
+  _INTERNAL_SERVICE_URL: https://credentialing-drive-iaq2ujb3ya-ue.a.run.app
+  _DRIVE_WATCH_OWNER: cloud
   _BETTER_AUTH_URL: https://auth.cozemahealth.com
   _BETTER_AUTH_JWT_AUDIENCE: https://app.cozemahealth.com
   _COZEMA_PLATFORM_ADMIN_EMAILS: justin.barry97@gmail.com
@@ -47,7 +51,7 @@ steps:
       - --service-account=credentialing-drive-runtime@$PROJECT_ID.iam.gserviceaccount.com
       - --add-cloudsql-instances=${_CLOUD_SQL_INSTANCE}
       - --update-secrets=GOOGLE_CLIENT_ID=credentialing-drive-prod-google-client-id:${_GOOGLE_CLIENT_ID_VERSION},GOOGLE_CLIENT_SECRET=credentialing-drive-prod-google-client-secret:${_GOOGLE_CLIENT_SECRET_VERSION},BETTER_AUTH_DATABASE_URL=better-auth-database-url:${_BETTER_AUTH_DATABASE_URL_VERSION},AUTH_EVENT_WEBHOOK_SECRET=auth-event-webhook-secret:${_AUTH_EVENT_WEBHOOK_SECRET_VERSION}
-      - --update-env-vars=GCP_PROJECT_ID=$PROJECT_ID,FIRESTORE_DATABASE=${_FIRESTORE_DATABASE},CLOUD_TASKS_LOCATION=${_TASKS_LOCATION},CLOUD_TASKS_QUEUE=${_TASKS_QUEUE},TASK_PROCESSOR_URL=${_APP_BASE_URL}/tasks/process-drive-file,TASK_INVOKER_SERVICE_ACCOUNT=credentialing-drive-tasks@$PROJECT_ID.iam.gserviceaccount.com,DRIVE_WATCH_RENEWAL_SERVICE_ACCOUNT=credentialing-drive-scheduler@$PROJECT_ID.iam.gserviceaccount.com,DRIVE_WATCH_RENEWAL_AUDIENCE=${_APP_BASE_URL},APP_BASE_URL=${_APP_BASE_URL},GOOGLE_REDIRECT_URI=${_GOOGLE_REDIRECT_URI},GOOGLE_DRIVE_WEBHOOK_URL=${_GOOGLE_DRIVE_WEBHOOK_URL},AUTH_PROVIDER=better_auth,BETTER_AUTH_URL=${_BETTER_AUTH_URL},BETTER_AUTH_JWT_AUDIENCE=${_BETTER_AUTH_JWT_AUDIENCE},BETTER_AUTH_GOOGLE_SIGN_IN_ENABLED=true,COZEMA_PLATFORM_ADMIN_EMAILS=${_COZEMA_PLATFORM_ADMIN_EMAILS}
+      - --update-env-vars=GCP_PROJECT_ID=$PROJECT_ID,FIRESTORE_DATABASE=${_FIRESTORE_DATABASE},CLOUD_TASKS_LOCATION=${_TASKS_LOCATION},CLOUD_TASKS_QUEUE=${_TASKS_QUEUE},TASK_PROCESSOR_URL=${_INTERNAL_SERVICE_URL}/tasks/process-drive-file,TASK_INVOKER_SERVICE_ACCOUNT=credentialing-drive-tasks@$PROJECT_ID.iam.gserviceaccount.com,DRIVE_WATCH_OWNER=${_DRIVE_WATCH_OWNER},DRIVE_WATCH_RENEWAL_SERVICE_ACCOUNT=credentialing-drive-scheduler@$PROJECT_ID.iam.gserviceaccount.com,DRIVE_WATCH_RENEWAL_AUDIENCE=${_INTERNAL_SERVICE_URL},APP_BASE_URL=${_APP_BASE_URL},GOOGLE_REDIRECT_URI=${_GOOGLE_REDIRECT_URI},GOOGLE_DRIVE_WEBHOOK_URL=${_GOOGLE_DRIVE_WEBHOOK_URL},AUTH_PROVIDER=better_auth,BETTER_AUTH_URL=${_BETTER_AUTH_URL},BETTER_AUTH_JWT_AUDIENCE=${_BETTER_AUTH_JWT_AUDIENCE},BETTER_AUTH_GOOGLE_SIGN_IN_ENABLED=true,COZEMA_PLATFORM_ADMIN_EMAILS=${_COZEMA_PLATFORM_ADMIN_EMAILS}
       - --labels=environment=production,managed-by=cloud-build,auth-provider=better-auth
 
 images:
