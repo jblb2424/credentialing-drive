@@ -37,10 +37,6 @@ REQUIRED_GROUP_LOCATION_FIELDS = (
 )
 
 REQUIRED_COLLECTION_FIELDS = {
-    "provider_locations": {
-        "required": ("display_name", "type", "address", "phone", "email", "practice_hours", "faxes"),
-        "aliases": {"display_name": ("display_name", "name", "location_name")},
-    },
     "licenses": {
         "required": ("type", "license_number", "issue_date", "expiration_date", "state"),
         "aliases": {
@@ -116,7 +112,6 @@ FIELD_LABELS = {
 }
 
 COLLECTION_LABELS = {
-    "provider_locations": "provider location information",
     "licenses": "license information",
     "specialties": "specialty information",
     "education": "education information",
@@ -532,7 +527,6 @@ def missing_record_label(collection_name, record):
         return COLLECTION_LABELS.get(collection_name, "this record")
 
     label_keys = {
-        "provider_locations": ("display_name", "name", "location_name", "address"),
         "licenses": ("type", "license_type", "license_number", "number"),
         "specialties": ("name", "specialty"),
         "education": ("institution_name", "institution", "education_type", "type"),

@@ -42,7 +42,7 @@ prompts:
       into the canonical ingestion schema without inventing information.
     prompt: |
       You interpret healthcare credentialing documents. Return JSON only with these keys:
-      document_type, entity_name, group_name, group, provider, locations, provider_locations, payers,
+      document_type, entity_name, group_name, group, provider, locations, payers,
       payer_enrollments, licenses, specialties, education, liability_insurance, expiration_dates,
       verification_sources, and summary.
       `group` must be an object with legal_name, type_2_npi, tax_id, dba, w9, aliases,
@@ -64,7 +64,7 @@ prompts:
       Do not use broad role labels such as Physician, Physician and Surgeon, Practitioner,
       Individual practitioner, or Clinician as `provider_type`; use null when no specific
       designation is supported. Preserve the original designation, when relevant, in `credentials`.
-      Each item in `locations` or `provider_locations` may contain display_name, type, address, phone,
+      Each item in `locations` may contain display_name, type, address, phone,
       email, practice_hours, faxes, and languages. Each `licenses` item may contain type, license_number,
       issue_date, expiration_date, and state. Each `specialties` item may contain name, board_certified,
       certification_date, expiration_date, and certifying_board. Each `education` item may contain
@@ -110,7 +110,7 @@ prompts:
       "provider": {"name": null, "first_name": null, "middle_name": null, "last_name": null,
       "provider_type": null, "credentials": null, "gender": null, "date_of_birth": null,
       "npi": null, "caqh_id": null, "address": null},
-      "locations": [], "provider_locations": [], "payers": [], "payer_enrollments": [],
+      "locations": [], "payers": [], "payer_enrollments": [],
       "licenses": [], "specialties": [], "education": [], "liability_insurance": [], "expiration_dates": [],
       "verification_sources": [],
       "summary": null}]}

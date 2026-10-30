@@ -54,7 +54,9 @@ from app.providers import (
     list_provider_expirations, list_providers, list_issue_summaries, list_entity_activity, get_record_activity,
     merge_duplicate_providers, remove_group_issue, remove_provider_issue,
     backfill_revision_previous_files, get_entity_ref,
-    update_group_manually, update_provider_manually,
+    migrate_legacy_provider_locations,
+    remove_group_provider_membership, update_group_manually, update_group_provider_membership,
+    update_provider_manually,
 )
 from app.reconciliation import reconcile_provider_records
 from app.report_exports import report_csv, report_filename
@@ -377,6 +379,47 @@ async def update_entity_group_by_id(
     return update_group_manually(group_id, payload.get("fields"), user, entity_id)
 
 
+@authenticated_router.put(
+    "/entities/{entity_id}/groups/{group_id}/providers/{provider_id}",
+    dependencies=[Depends(require_entity_permission("records:write"))],
+)
+async def update_entity_group_provider_membership(
+    entity_id: str, group_id: str, provider_id: str, request: Request,
+    user=Depends(require_authenticated_user),
+):
+    """Create or update a provider's location assignment within one practice."""
+    payload = await member_payload(request)
+    group = update_group_provider_membership(
+        group_id, provider_id, payload.get("location_ids"), user, entity_id
+    )
+    safely_record_audit_event(
+        entity_id,
+        "practice_provider_locations_updated",
+        user,
+        {"record_type": "practice", "record_id": group_id, "provider_id": provider_id},
+        {"location_count": len(payload.get("location_ids") or [])},
+    )
+    return group
+
+
+@authenticated_router.delete(
+    "/entities/{entity_id}/groups/{group_id}/providers/{provider_id}",
+    dependencies=[Depends(require_entity_permission("records:write"))],
+)
+def delete_entity_group_provider_membership(
+    entity_id: str, group_id: str, provider_id: str, user=Depends(require_authenticated_user),
+):
+    """Unlink a provider from a practice while preserving both records and locations."""
+    group = remove_group_provider_membership(group_id, provider_id, user, entity_id)
+    safely_record_audit_event(
+        entity_id,
+        "practice_provider_unlinked",
+        user,
+        {"record_type": "practice", "record_id": group_id, "provider_id": provider_id},
+    )
+    return group
+
+
 @authenticated_router.get("/entities/{entity_id}/groups/{group_id}/activity", dependencies=[Depends(require_entity_permission("activity:read"))])
 def get_entity_group_activity(
     entity_id: str, group_id: str, limit: int = Query(default=100, ge=1, le=500)
@@ -665,6 +708,13 @@ def delete_internal_provider(entity_id: str, provider_id: str, request: Request)
 def backfill_previous_revision_files(entity_id: str, request: Request):
     require_internal_token(request)
     return backfill_revision_previous_files(entity_id)
+
+
+@router.post("/internal/entities/{entity_id}/locations/migrate-provider-locations")
+def migrate_provider_locations(entity_id: str, request: Request):
+    """Safely migrate legacy provider-owned locations into practice subcollections."""
+    require_internal_token(request)
+    return migrate_legacy_provider_locations(entity_id)
 
 
 def prepare_google_connection(entity_id):

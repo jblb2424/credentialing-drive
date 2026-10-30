@@ -9,7 +9,6 @@ from app.config import RECONCILIATION_COLLECTION, reconciliation_enabled
 logger = logging.getLogger(__name__)
 
 RECONCILABLE_CATEGORIES = (
-    "provider_locations",
     "payer_enrollments",
     "licenses",
     "specialties",

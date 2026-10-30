@@ -8,6 +8,7 @@ FACT_EXTRACTION_FIELDS = (
     "group",
     "provider",
     "locations",
+    # Accepted only to migrate older extraction responses into the unified locations field.
     "provider_locations",
     "payers",
     "payer_enrollments",

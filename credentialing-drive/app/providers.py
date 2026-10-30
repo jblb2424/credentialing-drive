@@ -50,7 +50,6 @@ PROVIDER_MANUAL_FIELDS = {
 }
 GROUP_MANUAL_FIELDS = {"legal_name", "dba", "type_2_npi", "tax_id"}
 PROVIDER_MANUAL_COLLECTIONS = {
-    "provider_locations",
     "licenses",
     "specialties",
     "education",
@@ -173,28 +172,93 @@ def manual_group_changes(existing_group, fields):
     return updates, {"group": group_changes} if group_changes else {}
 
 
+def location_identity_key(location):
+    """Return a stable identity for a location within a single practice."""
+    source = location if isinstance(location, dict) else {"display_name": location}
+    address = source.get("address")
+    if isinstance(address, dict):
+        address = " ".join(
+            str(address.get(key) or "")
+            for key in ("line1", "line_1", "address_line_1", "street", "city", "state", "postal_code", "zip")
+        )
+    name = location_display_name(source)
+    parts = [normalized_key(name), normalized_key(address)]
+    if not any(parts):
+        return None
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+
+def location_values(location):
+    source = location if isinstance(location, dict) else {"display_name": location}
+    embedded_address = source.get("display_name") if isinstance(source.get("display_name"), dict) else None
+    return present_fields(
+        {
+            "display_name": location_display_name(source),
+            "type": source.get("type"),
+            "address": source.get("address") or embedded_address,
+            "phone": source.get("phone"),
+            "email": source.get("email"),
+            "practice_hours": source.get("practice_hours"),
+            "faxes": source.get("faxes"),
+            "languages": source.get("languages"),
+        }
+    )
+
+
+def upsert_group_locations(group_ref, raw_locations, collect_changes=False):
+    """Create or enrich location documents owned by one practice."""
+    location_ids = []
+    changes = {}
+    location_collection = group_ref.collection(LOCATION_COLLECTION)
+    for raw_location in raw_locations or []:
+        if not isinstance(raw_location, (dict, str)):
+            continue
+        source = dict(raw_location) if isinstance(raw_location, dict) else {"display_name": raw_location}
+        requested_id = source.pop("id", None)
+        identity_key = location_identity_key(source)
+        identity_ref = group_ref.collection("location_identities").document(identity_key) if identity_key else None
+        identity = identity_ref.get() if identity_ref else None
+        if identity and identity.exists:
+            location_id = (identity.to_dict() or {}).get("location_id")
+        elif requested_id and location_collection.document(requested_id).get().exists:
+            location_id = requested_id
+        else:
+            location_id = location_collection.document().id
+        if not location_id:
+            continue
+        # Preserve the group's identity map after a manual edit supplies an
+        # existing document ID with a new normalized name or address.
+        if identity_ref and not (identity and identity.exists):
+            identity_ref.set({"location_id": location_id})
+        location_ref = location_collection.document(location_id)
+        existing = location_ref.get().to_dict() or {}
+        incoming = location_values(source)
+        location_changes = {
+            field_name: {"current": current_value, **({"previous": existing[field_name]} if field_name in existing else {})}
+            for field_name, current_value in incoming.items()
+            if existing.get(field_name) != current_value
+        }
+        if incoming:
+            location_ref.set(incoming, merge=True)
+        if location_changes:
+            changes[location_id] = location_changes
+        if location_id not in location_ids:
+            location_ids.append(location_id)
+    return (location_ids, changes) if collect_changes else location_ids
+
+
 def replace_group_locations(group_ref, raw_locations):
-    """Replace practice locations while retaining Firestore document IDs where possible."""
+    """Replace practice-owned location documents while retaining their IDs where possible."""
     locations = manual_collection_value("locations", raw_locations)
     existing_snapshots = list(group_ref.collection(LOCATION_COLLECTION).stream())
-    existing_ids = {snapshot.id for snapshot in existing_snapshots}
-    incoming_ids = set()
-    cleaned_locations = []
-    for location in locations:
-        location = dict(location)
-        location_id = location.pop("id", None)
-        if location_id and location_id in existing_ids:
-            location_ref = group_ref.collection(LOCATION_COLLECTION).document(location_id)
-            incoming_ids.add(location_id)
-        else:
-            location_ref = group_ref.collection(LOCATION_COLLECTION).document()
-            incoming_ids.add(location_ref.id)
-        location_ref.set(location)
-        cleaned_locations.append({"id": location_ref.id, **location})
+    location_ids = upsert_group_locations(group_ref, locations)
     for snapshot in existing_snapshots:
-        if snapshot.id not in incoming_ids:
+        if snapshot.id not in location_ids:
             snapshot.reference.delete()
-    return cleaned_locations
+    return [
+        serialize_document(snapshot)
+        for snapshot in group_ref.collection(LOCATION_COLLECTION).stream()
+    ]
 
 
 def manual_revision_metadata(user):
@@ -451,13 +515,20 @@ def update_provider_manually(provider_id, fields, user, entity_id=DEFAULT_ENTITY
     if not snapshot.exists:
         raise HTTPException(status_code=404, detail="Provider not found")
 
+    if not isinstance(fields, dict) or not fields:
+        raise HTTPException(status_code=400, detail="Provide at least one field to update")
+    unexpected_fields = sorted(set(fields) - PROVIDER_MANUAL_FIELDS - PROVIDER_MANUAL_COLLECTIONS)
+    if unexpected_fields:
+        raise HTTPException(status_code=400, detail=f"These fields cannot be edited here: {', '.join(unexpected_fields)}")
+
     existing = snapshot.to_dict() or {}
     updates, changes = manual_provider_updates(existing, fields)
     if not changes:
         return get_provider(provider_id, entity_id)
 
     metadata = manual_revision_metadata(user)
-    provider_ref.set(updates, merge=True)
+    if updates:
+        provider_ref.set(updates, merge=True)
     record_provider_revision(provider_ref, metadata, changes, "manual_update", {})
     record_field_provenance(provider_ref, metadata, changes)
     refresh_provider_issue_summary(provider_ref)
@@ -510,6 +581,120 @@ def update_group_manually(group_id, fields, user, entity_id=DEFAULT_ENTITY_ID):
     record_group_revision(group_ref, metadata, changes, "manual_update", {})
     record_field_provenance(group_ref, metadata, changes)
     refresh_group_issue_summary(group_ref)
+    return get_group(group_id, entity_id)
+
+
+def update_group_provider_membership(group_id, provider_id, location_ids, user, entity_id=DEFAULT_ENTITY_ID):
+    """Manually assign one existing provider to one or more practice locations."""
+    entity_ref = get_entity_ref(get_firestore_client(), entity_id)
+    group_ref = entity_ref.collection(GROUP_COLLECTION).document(group_id)
+    group_snapshot = group_ref.get()
+    if not group_snapshot.exists:
+        raise HTTPException(status_code=404, detail="Practice not found")
+
+    provider_ref = entity_ref.collection(PROVIDER_COLLECTION).document(provider_id)
+    provider_snapshot = provider_ref.get()
+    if not provider_snapshot.exists:
+        raise HTTPException(status_code=404, detail="Provider not found")
+
+    if not isinstance(location_ids, list):
+        raise HTTPException(status_code=400, detail="Location IDs must be a list")
+    cleaned_location_ids = []
+    for location_id in location_ids:
+        if not isinstance(location_id, str) or not location_id.strip():
+            raise HTTPException(status_code=400, detail="Each location ID must be text")
+        location_id = location_id.strip()
+        if location_id not in cleaned_location_ids:
+            cleaned_location_ids.append(location_id)
+    if not cleaned_location_ids:
+        raise HTTPException(status_code=400, detail="Select at least one practice location")
+
+    available_location_ids = {
+        location_snapshot.id
+        for location_snapshot in group_ref.collection(LOCATION_COLLECTION).stream()
+    }
+    unknown_location_ids = sorted(set(cleaned_location_ids) - available_location_ids)
+    if unknown_location_ids:
+        raise HTTPException(status_code=400, detail="Selected locations do not belong to this practice")
+
+    membership_ref = entity_ref.collection(PROVIDER_GROUP_MEMBERSHIP_COLLECTION).document(
+        f"{provider_id}-{group_id}"
+    )
+    previous_membership = membership_ref.get().to_dict() or {}
+    previous_location_ids = previous_membership.get("location_ids") or []
+    if previous_location_ids == cleaned_location_ids:
+        return get_group(group_id, entity_id)
+
+    profile = (provider_snapshot.to_dict() or {}).get("provider") or {}
+    membership_ref.set(
+        {
+            "provider_id": provider_id,
+            "group_id": group_id,
+            "provider_type": profile.get("provider_type") or profile.get("credentials"),
+            "location_ids": cleaned_location_ids,
+        },
+        merge=True,
+    )
+
+    metadata = manual_revision_metadata(user)
+    group_changes = {
+        "linked_providers": {
+            provider_id: {"current": cleaned_location_ids, "previous": previous_location_ids}
+        }
+    }
+    provider_changes = {
+        "affiliations": {
+            group_id: {"current": cleaned_location_ids, "previous": previous_location_ids}
+        }
+    }
+    record_group_revision(group_ref, metadata, group_changes, "manual_update", {})
+    record_provider_revision(provider_ref, metadata, provider_changes, "manual_update", {})
+    return get_group(group_id, entity_id)
+
+
+def remove_group_provider_membership(group_id, provider_id, user, entity_id=DEFAULT_ENTITY_ID):
+    """Unlink a provider from a practice without deleting either record or its locations."""
+    entity_ref = get_entity_ref(get_firestore_client(), entity_id)
+    group_ref = entity_ref.collection(GROUP_COLLECTION).document(group_id)
+    group_snapshot = group_ref.get()
+    if not group_snapshot.exists:
+        raise HTTPException(status_code=404, detail="Practice not found")
+
+    provider_ref = entity_ref.collection(PROVIDER_COLLECTION).document(provider_id)
+    provider_snapshot = provider_ref.get()
+    if not provider_snapshot.exists:
+        raise HTTPException(status_code=404, detail="Provider not found")
+
+    membership_ref = entity_ref.collection(PROVIDER_GROUP_MEMBERSHIP_COLLECTION).document(
+        f"{provider_id}-{group_id}"
+    )
+    membership_snapshot = membership_ref.get()
+    if not membership_snapshot.exists:
+        raise HTTPException(status_code=404, detail="Provider is not linked to this practice")
+
+    membership = membership_snapshot.to_dict() or {}
+    previous_location_ids = membership.get("location_ids") or []
+    for payer_snapshot in membership_ref.collection(PAYER_ENROLLMENT_COLLECTION).stream():
+        payer_snapshot.reference.delete()
+    membership_ref.delete()
+
+    metadata = manual_revision_metadata(user)
+    record_group_revision(
+        group_ref,
+        metadata,
+        {"linked_providers": {provider_id: {"previous": previous_location_ids, "current": None}}},
+        "manual_update",
+        {},
+    )
+    record_provider_revision(
+        provider_ref,
+        metadata,
+        {"affiliations": {group_id: {"previous": previous_location_ids, "current": None}}},
+        "manual_update",
+        {},
+    )
+    refresh_group_issue_summary(group_ref)
+    refresh_provider_issue_summary(provider_ref, provider_snapshot.to_dict() or {})
     return get_group(group_id, entity_id)
 
 
@@ -630,6 +815,7 @@ def get_group_providers(entity_ref, group_id):
                 "name": profile.get("name"),
                 "npi": profile.get("npi"),
                 "provider_type": profile.get("provider_type"),
+                "location_ids": membership.get("location_ids") or [],
             }
         )
 
@@ -705,13 +891,15 @@ def normalize_provider_data(extraction):
         "caqh_id": provider.get("caqh_id") or provider.get("caqh"),
         "address": provider.get("address") or extraction.get("provider_address"),
     })
+    locations = merge_unique(
+        as_list(extraction.get("locations")), as_list(extraction.get("provider_locations"))
+    )
     return normalize_date_fields({
         "entity_name": extraction.get("entity_name"),
         "group_name": extraction.get("group_name"),
         "group": normalize_group_data(extraction),
         "provider": profile,
-        "locations": as_list(extraction.get("locations")),
-        "provider_locations": as_list(extraction.get("provider_locations")),
+        "locations": locations,
         "payers": as_list(extraction.get("payers")),
         "payer_enrollments": as_list(extraction.get("payer_enrollments")),
         "licenses": as_list(extraction.get("licenses")),
@@ -963,54 +1151,6 @@ def upsert_normalized_group(normalized_data, metadata=None, document_category="o
     return group_ref.id
 
 
-def upsert_group_locations(group_ref, locations, collect_changes=False):
-    location_ids = []
-    changes = {}
-    for location in locations or []:
-        location_name = location_display_name(location)
-        location_key = normalized_key(location_name)
-        if not location_key:
-            continue
-        identity_ref = group_ref.collection("location_identities").document(location_key)
-        identity = identity_ref.get()
-        if identity.exists:
-            location_id = identity.to_dict()["location_id"]
-        else:
-            location_id = group_ref.collection(LOCATION_COLLECTION).document().id
-            identity_ref.set({"location_id": location_id})
-        source = location if isinstance(location, dict) else {}
-        embedded_address = source.get("display_name") if isinstance(source.get("display_name"), dict) else None
-        location_ref = group_ref.collection(LOCATION_COLLECTION).document(location_id)
-        existing = location_ref.get().to_dict() or {}
-        incoming = present_fields(
-            {
-                "display_name": location_name,
-                "type": source.get("type"),
-                "address": source.get("address") or embedded_address,
-                "phone": source.get("phone"),
-                "email": source.get("email"),
-                "practice_hours": source.get("practice_hours"),
-                "faxes": source.get("faxes"),
-                "languages": source.get("languages"),
-            }
-        )
-        location_changes = {}
-        for field_name, current_value in incoming.items():
-            previous_value = existing.get(field_name)
-            if previous_value == current_value:
-                continue
-            change = {"current": current_value}
-            if previous_value is not None:
-                change["previous"] = previous_value
-            location_changes[field_name] = change
-        if incoming:
-            location_ref.set(incoming, merge=True)
-        if location_changes:
-            changes[location_id] = location_changes
-        location_ids.append(location_id)
-    return (location_ids, changes) if collect_changes else location_ids
-
-
 def upsert_provider_group_membership(entity_ref, provider_id, group_ref, provider):
     if not group_ref:
         return None
@@ -1098,7 +1238,6 @@ def provider_changes(existing, updated):
         changes["provider"] = profile_changes
 
     for field_name in (
-        "provider_locations",
         "payer_enrollments",
         "licenses",
         "specialties",
@@ -1269,7 +1408,6 @@ def backfill_revision_previous_files(entity_id=DEFAULT_ENTITY_ID):
 
 DATE_REPAIR_PROVIDER_FIELDS = (
     "provider",
-    "provider_locations",
     "payer_enrollments",
     "licenses",
     "specialties",
@@ -1283,6 +1421,12 @@ DATE_NORMALIZATION_METADATA = {
     "name": "Canonical date normalization",
     # This deterministic storage repair is not competing source evidence.
     "source_type": "manual",
+}
+
+PROVIDER_LOCATION_MIGRATION_METADATA = {
+    "id": "provider-locations-to-group-locations-v1",
+    "name": "Move legacy provider locations to practice locations",
+    "source_type": "migration",
 }
 
 
@@ -1388,6 +1532,88 @@ def repair_entity_date_storage(entity_id=DEFAULT_ENTITY_ID):
     return results
 
 
+def migrate_legacy_provider_locations(entity_id=DEFAULT_ENTITY_ID):
+    """Move unambiguous legacy provider locations into their owning practice.
+
+    A provider can belong to multiple practices, so this migration never guesses
+    which practice owns a legacy location. Only providers with exactly one valid
+    membership are migrated; every other legacy record is reported unchanged.
+    """
+    entity_ref = get_entity_ref(get_firestore_client(), entity_id)
+    results = {
+        "entity_id": entity_id,
+        "providers_migrated": 0,
+        "locations_migrated": 0,
+        "unresolved": [],
+    }
+
+    membership_collection = entity_ref.collection(PROVIDER_GROUP_MEMBERSHIP_COLLECTION)
+    for provider_snapshot in entity_ref.collection(PROVIDER_COLLECTION).stream():
+        provider = provider_snapshot.to_dict() or {}
+        legacy_locations = provider.get("provider_locations") or []
+        if not legacy_locations:
+            continue
+
+        memberships = list(
+            membership_collection.where("provider_id", "==", provider_snapshot.id).stream()
+        )
+        if len(memberships) != 1:
+            results["unresolved"].append(
+                {
+                    "provider_id": provider_snapshot.id,
+                    "reason": "Provider must have exactly one affiliated practice",
+                    "membership_count": len(memberships),
+                }
+            )
+            continue
+
+        membership_snapshot = memberships[0]
+        membership = membership_snapshot.to_dict() or {}
+        group_id = membership.get("group_id")
+        group_ref = entity_ref.collection(GROUP_COLLECTION).document(group_id) if group_id else None
+        if not group_ref or not group_ref.get().exists:
+            results["unresolved"].append(
+                {
+                    "provider_id": provider_snapshot.id,
+                    "reason": "The affiliated practice no longer exists",
+                    "group_id": group_id,
+                }
+            )
+            continue
+
+        location_ids = upsert_group_locations(group_ref, legacy_locations)
+        merged_location_ids = list(
+            dict.fromkeys((membership.get("location_ids") or []) + location_ids)
+        )
+        membership_snapshot.reference.set({"location_ids": merged_location_ids}, merge=True)
+        provider_snapshot.reference.set({"provider_locations": firestore.DELETE_FIELD}, merge=True)
+        record_provider_revision(
+            provider_snapshot.reference,
+            PROVIDER_LOCATION_MIGRATION_METADATA,
+            {
+                "provider_locations": {
+                    "previous": legacy_locations,
+                    "current": "Moved to affiliated practice locations",
+                }
+            },
+            "migration",
+            {},
+        )
+        record_group_revision(
+            group_ref,
+            PROVIDER_LOCATION_MIGRATION_METADATA,
+            {"locations": {"migrated_from_provider_id": provider_snapshot.id}},
+            "migration",
+            {},
+        )
+        refresh_provider_issue_summary(provider_snapshot.reference, provider)
+        refresh_group_issue_summary(group_ref)
+        results["providers_migrated"] += 1
+        results["locations_migrated"] += len(location_ids)
+
+    return results
+
+
 def upsert_normalized_provider(provider, metadata, document_category="other", entity_id=DEFAULT_ENTITY_ID):
     client = get_firestore_client()
     entity_ref = get_entity_ref(client, entity_id)
@@ -1402,9 +1628,6 @@ def upsert_normalized_provider(provider, metadata, document_category="other", en
     merged_profile = merge_profile(existing_profile, incoming_profile)
     canonical_provider = {
         "provider": merged_profile,
-        "provider_locations": merge_unique(
-            existing.get("provider_locations"), provider.get("provider_locations")
-        ),
         "payer_enrollments": merge_unique(
             existing.get("payer_enrollments"), provider.get("payer_enrollments")
         ),
@@ -1546,7 +1769,7 @@ def merge_duplicate_providers(target_provider_id, duplicate_provider_ids, entity
     for source in provider_data[1:]:
         merged["provider"] = merge_profile(merged.get("provider") or {}, source.get("provider") or {})
         for field_name in (
-            "provider_locations", "payer_enrollments", "licenses", "specialties",
+            "payer_enrollments", "licenses", "specialties",
             "education", "liability_insurance", "expiration_dates",
         ):
             merge_function = merge_license_records if field_name == "licenses" else merge_unique

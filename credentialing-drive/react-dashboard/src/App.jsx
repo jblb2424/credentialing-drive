@@ -2,6 +2,7 @@ import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { Link, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AuthControls } from "./auth.jsx";
 import { entityPath, fetchJson, fetchWithAuth } from "./api.js";
+import { IssueDismissalDialog, IssueDismissButton, TrashIcon, useIssueDismissal } from "./issue-dismissal.jsx";
 import { useWorkspace } from "./workspace.jsx";
 import { DEFAULT_ENTITY_ID, addressLabel, categoryLabel, dateLabel, expirationState, fieldLabel, issueLabel, issueTypeLabel, locationLabel, priority, providerData, recordName, shortDate, timestampLabel, value } from "./utils.js";
 
@@ -18,6 +19,34 @@ const EDITABLE_RECORD_ROLES = new Set(["super_admin", "customer_admin", "manager
 
 function BrandWordmark() {
   return <>Cozema<span className="brand-accent">Health</span></>;
+}
+
+function DetailActionsMenu({ actionLabel, onAction }) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeIfOutside = (event) => {
+      if (!menuRef.current?.contains(event.target)) setOpen(false);
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", closeIfOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeIfOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return <div className="detail-actions-menu" ref={menuRef}>
+    <button className="detail-actions-trigger" type="button" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((current) => !current)}>Actions<span aria-hidden="true">•••</span></button>
+    {open && <div className="detail-actions-popover" role="menu">
+      <button className="detail-actions-danger" type="button" role="menuitem" onClick={() => { setOpen(false); onAction(); }}><TrashIcon />{actionLabel}</button>
+    </div>}
+  </div>;
 }
 
 function useEntity() {
@@ -46,6 +75,38 @@ function useRequest(path) {
 
 function href(path, entityId) {
   return `${path}${path.includes("?") ? "&" : "?"}entity=${encodeURIComponent(entityId)}`;
+}
+
+function normalizedLocationIdentityPart(value) {
+  return typeof value === "string"
+    ? value.trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+    : "";
+}
+
+function locationIdentityKey(location) {
+  const address = location?.address;
+  const name = normalizedLocationIdentityPart(
+    location?.display_name || location?.name || (typeof address === "object" ? address?.display_name : ""),
+  );
+  const addressText = normalizedLocationIdentityPart(
+    typeof address === "string"
+      ? address
+      : address?.line_1 || address?.address_line_1 || address?.street || location?.line_1 || location?.address_line_1 || location?.street,
+  );
+
+  return name || addressText ? `${name}:${addressText}` : "";
+}
+
+function uniqueLocations(locations) {
+  const seen = new Set();
+  return locations.filter((location, index) => {
+    // A provider can belong to multiple practices that reference the same place.
+    // Use stable real-world fields so the provider profile does not repeat it.
+    const key = locationIdentityKey(location) || `record:${location?.id || index}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function LoadingCount({ label }) {
@@ -169,19 +230,13 @@ function allIssues(summaries) {
   });
 }
 
-function issueKey(issue) {
-  const recordType = issue.record_type || issue.recordType || (issue.group_id ? "practice" : "provider");
-  const recordId = issue.provider_id || issue.group_id || issue.recordId || issue.record?.id;
-  return `${recordType}:${recordId || "unknown"}:${issue.id || issueLabel(issue)}`;
-}
-
 function optimisticRecordUpdate(type, record, fields) {
   if (type === "practice") return { ...record, ...fields };
 
   const profileFields = {};
   const collectionFields = {};
   for (const [key, fieldValue] of Object.entries(fields)) {
-    if (["provider_locations", "licenses", "specialties", "education", "liability_insurance", "payer_enrollments"].includes(key)) collectionFields[key] = fieldValue;
+    if (["licenses", "specialties", "education", "liability_insurance", "payer_enrollments"].includes(key)) collectionFields[key] = fieldValue;
     else profileFields[key] = fieldValue;
   }
   return {
@@ -195,17 +250,14 @@ function Dashboard() {
   const entityId = useEntity();
   const workspace = useWorkspace();
   const [refreshKey, setRefreshKey] = useState(0);
-  const [pendingRemoval, setPendingRemoval] = useState(null);
-  const [removalError, setRemovalError] = useState("");
-  const [removalMessage, setRemovalMessage] = useState("");
-  const [removedIssueKeys, setRemovedIssueKeys] = useState(() => new Set());
   const groups = useRequest(`${entityPath(entityId, "/groups?limit=500")}&refresh=${refreshKey}`);
   const providers = useRequest(`${entityPath(entityId, "/providers?limit=500")}&refresh=${refreshKey}`);
   const issueSummaries = useRequest(`${entityPath(entityId, `/issues?refresh=${refreshKey}`)}`);
   const connections = useRequest(entityPath(entityId, "/connections"));
+  const dismissal = useIssueDismissal(entityId, { onDismissed: () => setRefreshKey((key) => key + 1) });
   const groupRecords = groups.data?.groups || [];
   const providerRecords = providers.data?.providers || [];
-  const issues = allIssues(issueSummaries.data?.issues || []).filter((issue) => !removedIssueKeys.has(issueKey(issue)));
+  const issues = allIssues(issueSummaries.data?.issues || []);
   const expiring = issues.filter((issue) => issue.type === "expiring");
   const critical = issues.filter((issue) => issue.severity === "critical").sort((left, right) => priority(left) - priority(right)).slice(0, 5);
   const canManageIssues = ["super_admin", "customer_admin", "manager", "credentialing_specialist"].includes(workspace?.user?.role);
@@ -215,34 +267,6 @@ function Dashboard() {
   const driveConnected = Boolean(drive?.connected);
   const intakeFolderConfigured = Boolean(drive?.intake_folder_configured);
   const intakeReady = Boolean(drive?.intake_ready);
-  const removeIssue = () => {
-    if (!pendingRemoval) return;
-    const issue = pendingRemoval;
-    const recordType = issue.record_type || (issue.group_id ? "practice" : "provider");
-    const recordId = issue.provider_id || issue.group_id || issue.record?.id;
-    if (!recordId) return;
-    const key = issueKey(issue);
-    setRemovedIssueKeys((current) => new Set([...current, key]));
-    setPendingRemoval(null);
-    setRemovalError("");
-    setRemovalMessage("Issue removed. Saving change...");
-    void (async () => {
-      const collection = recordType === "practice" ? "groups" : "providers";
-      try {
-        const response = await fetchWithAuth(entityPath(entityId, `/${collection}/${encodeURIComponent(recordId)}/issues/${encodeURIComponent(issue.id)}/remove`), { method: "POST" });
-        if (!response.ok) throw new Error(`Request failed (${response.status})`);
-        setRemovalMessage("Issue removed.");
-      } catch (error) {
-        setRemovedIssueKeys((current) => {
-          const next = new Set(current);
-          next.delete(key);
-          return next;
-        });
-        setRemovalMessage("");
-        setRemovalError(`${error.message || "We could not remove this issue."} The issue has been restored.`);
-      }
-    })();
-  };
   useEffect(() => { document.title = "Credentialing Operations | Cozema Health"; }, []);
   return <Shell active="overview" refresh={() => setRefreshKey((key) => key + 1)}>
     <section className="hero"><p className="eyebrow">Credentialing overview</p><h1>{Greeting()}</h1><p className="lede">Keep enrollment moving by resolving the provider records that need attention first.</p></section>
@@ -253,47 +277,21 @@ function Dashboard() {
       <Link className="metric-card metric-issue metric-link" to={href("/issues/view", entityId)}><p>Open issues</p>{issueSummaries.loading ? <LoadingCount label="issues" /> : <strong>{issueSummaries.error ? "Unavailable" : issues.length}</strong>}<span>Review all outstanding issues</span></Link>
       <Link className="metric-card metric-warning metric-link" to={href("/expirations/view?status=expiring", entityId)}><p>Credentials expiring soon</p>{issueSummaries.loading ? <LoadingCount label="expiring credentials" /> : <strong>{issueSummaries.error ? "Unavailable" : expiring.length}</strong>}<span>Within the next 90 days</span></Link>
     </section>
-    <section className="attention-panel"><div className="section-heading"><div><p className="eyebrow">Priority work</p><h2>Attention required</h2></div><Link to={href("/providers/view", entityId)}>View provider directory</Link></div>
-      <div className="attention-list">{issueSummaries.loading ? <div className="loading-row"><span className="spinner" />Loading critical issues...</div> : issueSummaries.error ? <div className="empty-state">{issueSummaries.error.message}</div> : critical.length ? critical.map((issue, index) => <CriticalIssue key={`${issue.id || issueLabel(issue)}-${index}`} issue={issue} entityId={entityId} canManageIssues={canManageIssues} onRemove={() => { setRemovalError(""); setRemovalMessage(""); setPendingRemoval(issue); }} />) : <div className="empty-state">No critical issues require immediate attention.</div>}</div>
-      {(removalMessage || removalError) && <p className={`operation-notice ${removalError ? "is-error" : ""}`} role={removalError ? "alert" : "status"}>{removalError || removalMessage}</p>}
+    <section className="attention-panel"><div className="section-heading"><div><p className="eyebrow">Priority work</p><h2>Attention required</h2></div></div>
+      <div className="attention-list">{issueSummaries.loading ? <div className="loading-row"><span className="spinner" />Loading critical issues...</div> : issueSummaries.error ? <div className="empty-state">{issueSummaries.error.message}</div> : critical.length ? critical.map((issue, index) => <CriticalIssue key={`${issue.id || issueLabel(issue)}-${index}`} issue={issue} entityId={entityId} canManageIssues={canManageIssues} onDismiss={dismissal.requestDismissal} />) : <div className="empty-state">No critical issues require immediate attention.</div>}</div>
+      {(dismissal.message || dismissal.error) && <p className={`operation-notice ${dismissal.error ? "is-error" : ""}`} role={dismissal.error ? "alert" : "status"}>{dismissal.error || dismissal.message}</p>}
     </section>
     <section className="groups-section"><div className="section-heading"><div><p className="eyebrow">Practice network</p><h2>Practices</h2></div><Link to={href("/practices/view", entityId)}>Browse all practices</Link></div><div className="group-list">{groups.loading ? <div className="loading-row"><span className="spinner" />Loading practices...</div> : groups.error ? <div className="empty-state">{groups.error.message}</div> : groupRecords.map((group) => <Link className="group-chip" key={group.id} to={href(`/practices/${encodeURIComponent(group.id)}/view`, entityId)}>{value(group.legal_name || group.name, "Unnamed practice")}</Link>)}</div></section>
-    <IssueRemovalDialog issue={pendingRemoval} error={removalError} onCancel={() => setPendingRemoval(null)} onConfirm={removeIssue} />
+    <IssueDismissalDialog issue={dismissal.pendingIssue} error={dismissal.error} saving={dismissal.saving} onCancel={dismissal.cancelDismissal} onConfirm={dismissal.confirmDismissal} />
   </Shell>;
 }
 
-function CriticalIssue({ issue, entityId, canManageIssues, onRemove }) {
+function CriticalIssue({ issue, entityId, canManageIssues, onDismiss }) {
   const record = issue.record || issue.provider || issue.group || {};
   const type = issue.record_type || (issue.group_id ? "practice" : "provider");
   const id = issue.provider_id || issue.group_id || record.id;
   const link = id ? href(`/${type === "practice" ? "practices" : "providers"}/${encodeURIComponent(id)}/issues/${encodeURIComponent(issue.id)}/view`, entityId) : href("/issues/view", entityId);
-  return <div className={`attention-row ${issue.type === "expired" ? "is-expired" : ""}`}><Link className="attention-provider" to={link}>{value(issue.provider_name || issue.group_name || recordName(record))}<span>{value(issue.provider_npi || record?.provider?.npi, "NPI not captured")}</span></Link><Link className="attention-detail" to={link}>{issueLabel(issue)}</Link><span className="issue-tags"><span className={`severity-tag severity-${issue.severity}`}>{value(issue.severity, "high")}</span><span className={`issue-type-tag issue-type-${issue.type}`}>{issueTypeLabel(issue.type)}</span>{canManageIssues && <button className="issue-remove-button" type="button" onClick={onRemove}>Remove</button>}</span></div>;
-}
-
-function IssueRemovalDialog({ issue, error, onCancel, onConfirm, saving = false }) {
-  if (!issue) return null;
-  return <div
-    className="provider-delete-backdrop"
-    role="presentation"
-    onMouseDown={() => !saving && onCancel()}
-  >
-    <section
-      className="provider-delete-dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="remove-issue-title"
-      onMouseDown={(event) => event.stopPropagation()}
-    >
-      <p className="eyebrow">Issue management</p>
-      <h2 id="remove-issue-title">Remove this issue?</h2>
-      <p><strong>{issueLabel(issue)}</strong> will be hidden from open-issue counts, lists, reports, and expiration follow-up. The underlying credentialing data and audit trail remain unchanged.</p>
-      {error && <p className="connection-error" role="alert">{error}</p>}
-      <div className="provider-delete-actions">
-        <button className="secondary-button" type="button" onClick={onCancel} disabled={saving}>Cancel</button>
-        <button className="primary-button danger-primary-button" type="button" onClick={onConfirm} disabled={saving}>{saving ? "Removing..." : "Remove issue"}</button>
-      </div>
-    </section>
-  </div>;
+  return <div className={`attention-row ${issue.type === "expired" ? "is-expired" : ""}`}><Link className="attention-provider" to={link}>{value(issue.provider_name || issue.group_name || recordName(record))}<span>{value(issue.provider_npi || record?.provider?.npi, "NPI not captured")}</span></Link><Link className="attention-detail" to={link}>{issueLabel(issue)}</Link><span className="issue-tags"><span className={`severity-tag severity-${issue.severity}`}>{value(issue.severity, "high")}</span><span className={`issue-type-tag issue-type-${issue.type}`}>{issueTypeLabel(issue.type)}</span>{canManageIssues && <IssueDismissButton issue={issue} onDismiss={onDismiss} />}</span></div>;
 }
 
 function Directory({ type }) {
@@ -328,18 +326,25 @@ function DirectoryRow({ record, type, entityId }) {
 
 function Expirations() {
   const entityId = useEntity();
+  const workspace = useWorkspace();
   const [params] = useSearchParams();
   const status = params.get("status");
   const request = useRequest(entityPath(entityId, "/expirations?limit=5000"));
+  const dismissal = useIssueDismissal(entityId, { onDismissed: request.refresh });
   const records = (request.data?.expirations || []).filter((record) => !status || record.type === status);
+  const canManageIssues = EDITABLE_RECORD_ROLES.has(workspace?.user?.role);
   document.title = "Expirations | Cozema Health";
-  return <Shell active="expirations"><section className="workspace-hero"><p className="eyebrow">Credential lifecycle</p><h1>Expirations</h1><p className="lede">Every captured credential expiration across this client, with expired records first and upcoming dates in order.</p></section><section className="workspace-panel"><div className="section-heading"><div><p className="eyebrow">{status === "expiring" ? "Next 90 days" : "All captured dates"}</p><h2>{request.loading ? <LoadingCount label="expiration count" /> : records.length} {status === "expiring" ? "credentials expiring soon" : "expiration records"}</h2></div></div><div className="provider-table-wrap"><table className="provider-table expiration-table"><thead><tr><th>Credential</th><th>Provider</th><th>Expiration date</th><th>Status</th></tr></thead><tbody>{request.loading ? <EmptyRow columns="4"><InlineLoading text="Loading expiration records..." /></EmptyRow> : request.error ? <EmptyRow columns="4">{request.error.message}</EmptyRow> : records.length ? records.map((record, index) => <ExpirationRow record={record} entityId={entityId} key={`${record.provider_id}-${record.expiration_date}-${index}`} />) : <EmptyRow columns="4">No credential expiration dates have been captured yet.</EmptyRow>}</tbody></table></div></section></Shell>;
+  return <Shell active="expirations"><section className="workspace-hero"><p className="eyebrow">Credential lifecycle</p><h1>Expirations</h1><p className="lede">Every captured credential expiration across this client, with expired records first and upcoming dates in order.</p></section><section className="workspace-panel"><div className="section-heading"><div><p className="eyebrow">{status === "expiring" ? "Next 90 days" : "All captured dates"}</p><h2>{request.loading ? <LoadingCount label="expiration count" /> : records.length} {status === "expiring" ? "credentials expiring soon" : "expiration records"}</h2></div></div><div className="provider-table-wrap"><table className="provider-table expiration-table"><thead><tr><th>Credential</th><th>Provider</th><th>Expiration date</th><th>Status</th>{canManageIssues && <th className="expiration-action-heading"><span className="sr-only">Actions</span></th>}</tr></thead><tbody>{request.loading ? <EmptyRow columns={canManageIssues ? 5 : 4}><InlineLoading text="Loading expiration records..." /></EmptyRow> : request.error ? <EmptyRow columns={canManageIssues ? 5 : 4}>{request.error.message}</EmptyRow> : records.length ? records.map((record, index) => <ExpirationRow record={record} entityId={entityId} canManageIssues={canManageIssues} onDismiss={dismissal.requestDismissal} key={`${record.provider_id}-${record.id}-${index}`} />) : <EmptyRow columns={canManageIssues ? 5 : 4}>No credential expiration dates have been captured yet.</EmptyRow>}</tbody></table></div>{(dismissal.message || dismissal.error) && <p className={`operation-notice ${dismissal.error ? "is-error" : ""}`} role={dismissal.error ? "alert" : "status"}>{dismissal.error || dismissal.message}</p>}</section><IssueDismissalDialog issue={dismissal.pendingIssue} error={dismissal.error} saving={dismissal.saving} onCancel={dismissal.cancelDismissal} onConfirm={dismissal.confirmDismissal} /></Shell>;
 }
 
-function ExpirationRow({ record, entityId }) {
+function ExpirationRow({ record, entityId, canManageIssues, onDismiss }) {
   const navigate = useNavigate();
   const open = () => navigate(href(`/providers/${encodeURIComponent(record.provider_id)}/view`, entityId));
-  return <tr className={`expiration-row ${record.type === "expired" ? "is-expired" : ""}`} tabIndex="0" role="button" onClick={open} onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && open()}><td>{value(record.credential_label, "Unclassified credential")}<span className="expiration-subtitle">{issueTypeLabel(record.credential_category || "unclassified")}</span></td><td><strong>{value(record.provider_name)}</strong><span className="expiration-subtitle">{value(record.provider_npi, "NPI not captured")}</span></td><td className={`expiration-date ${record.type === "expired" ? "is-expired" : ""}`}>{shortDate(record.expiration_date)}</td><td><span className={`severity-tag status-${record.type}`}>{record.type === "expired" ? `${record.days_past_expiration} days past due` : `${record.days_until_expiration} days remaining`}</span></td></tr>;
+  const keyDown = (event) => {
+    if (event.target !== event.currentTarget) return;
+    if (event.key === "Enter" || event.key === " ") open();
+  };
+  return <tr className={`expiration-row ${record.type === "expired" ? "is-expired" : ""}`} tabIndex="0" role="button" onClick={open} onKeyDown={keyDown}><td>{value(record.credential_label, "Unclassified credential")}<span className="expiration-subtitle">{issueTypeLabel(record.credential_category || "unclassified")}</span></td><td><strong>{value(record.provider_name)}</strong><span className="expiration-subtitle">{value(record.provider_npi, "NPI not captured")}</span></td><td className={`expiration-date ${record.type === "expired" ? "is-expired" : ""}`}>{shortDate(record.expiration_date)}</td><td><span className={`severity-tag status-${record.type}`}>{record.type === "expired" ? `${record.days_past_expiration} days past due` : `${record.days_until_expiration} days remaining`}</span></td>{canManageIssues && <td className="expiration-action"><IssueDismissButton issue={record} onDismiss={onDismiss} /></td>}</tr>;
 }
 
 function Issues() {
@@ -820,6 +825,8 @@ function ProviderRecord() {
   const [optimisticRecord, setOptimisticRecord] = useState(null);
   const [saveMessage, setSaveMessage] = useState("");
   const [saveError, setSaveError] = useState("");
+  const [linkedLocationDialogOpen, setLinkedLocationDialogOpen] = useState(false);
+  const [affiliationsDialogOpen, setAffiliationsDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
@@ -828,17 +835,17 @@ function ProviderRecord() {
   // credentials and issues live alongside it in the same response.
   const record = optimisticRecord || request.data;
   const data = providerData(record);
-  const locations = record?.provider_locations || data.locations || data.provider_locations || record?.locations || [];
+  const affiliations = (record?.affiliations || []).filter((affiliation) => affiliation.group?.id);
+  const locations = uniqueLocations(affiliations.flatMap((affiliation) => affiliation.locations || []));
   const licenses = data.licenses || record?.licenses || [];
   const specialties = data.specialties || record?.specialties || [];
   const education = data.education || record?.education || [];
   const insurance = data.liability_insurance || data.insurance || record?.liability_insurance || [];
   const payers = record?.payer_enrollments || data.payers || data.payer_enrollment || record?.payers || [];
-  const affiliations = (record?.affiliations || []).filter((affiliation) => affiliation.group?.id);
   const issues = recordIssues(record);
   const canEdit = EDITABLE_RECORD_ROLES.has(workspace?.user?.role);
   useEffect(() => { if (record) document.title = `${value(data.name, "Provider")} | Cozema Health`; }, [record, data.name]);
-  useEffect(() => { setOptimisticRecord(null); setSaveMessage(""); setSaveError(""); setDeleteDialogOpen(false); setDeleteError(""); }, [providerId]);
+  useEffect(() => { setOptimisticRecord(null); setSaveMessage(""); setSaveError(""); setLinkedLocationDialogOpen(false); setAffiliationsDialogOpen(false); setDeleteDialogOpen(false); setDeleteError(""); }, [providerId]);
   if (request.loading) return <RecordLoading />;
   if (request.error) return <RecordError error={request.error} />;
   const edit = (section) => canEdit ? () => setEditingSection(section) : undefined;
@@ -862,6 +869,62 @@ function ProviderRecord() {
         setSaveError(`${error.message || "We could not save your changes."} Your prior values have been restored.`);
       });
   };
+  const savePracticeLocationLink = async (selectedGroupId, locationIds) => {
+    setSaveError("");
+    setSaveMessage("Saving practice location assignment...");
+    try {
+      const savedGroup = await fetchJson(entityPath(entityId, `/groups/${encodeURIComponent(selectedGroupId)}/providers/${encodeURIComponent(providerId)}`), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ location_ids: locationIds }),
+      });
+      const existingAffiliation = (record.affiliations || []).find((affiliation) => affiliation.group?.id === selectedGroupId);
+      const membership = (savedGroup.providers || []).find((provider) => provider.id === providerId);
+      const savedLocationIds = membership?.location_ids || locationIds;
+      const nextAffiliation = {
+        ...existingAffiliation,
+        id: existingAffiliation?.id || `${providerId}-${selectedGroupId}`,
+        provider_id: providerId,
+        group_id: selectedGroupId,
+        location_ids: savedLocationIds,
+        group: {
+          id: savedGroup.id,
+          legal_name: savedGroup.legal_name,
+          name: savedGroup.name,
+          type_2_npi: savedGroup.type_2_npi,
+        },
+        locations: (savedGroup.locations || []).filter((location) => savedLocationIds.includes(location.id)),
+      };
+      setOptimisticRecord({
+        ...record,
+        affiliations: [
+          ...(record.affiliations || []).filter((affiliation) => affiliation.group?.id !== selectedGroupId),
+          nextAffiliation,
+        ],
+      });
+      setSaveMessage("Practice location assignment saved.");
+    } catch (error) {
+      setSaveMessage("");
+      setSaveError(error.message || "We could not save this practice location assignment.");
+      throw error;
+    }
+  };
+  const unlinkPractice = async (selectedGroupId) => {
+    setSaveError("");
+    setSaveMessage("Unlinking practice...");
+    try {
+      await fetchJson(entityPath(entityId, `/groups/${encodeURIComponent(selectedGroupId)}/providers/${encodeURIComponent(providerId)}`), { method: "DELETE" });
+      setOptimisticRecord({
+        ...record,
+        affiliations: (record.affiliations || []).filter((affiliation) => affiliation.group?.id !== selectedGroupId),
+      });
+      setSaveMessage("Practice unlinked.");
+    } catch (error) {
+      setSaveMessage("");
+      setSaveError(error.message || "We could not unlink this practice.");
+      throw error;
+    }
+  };
   const deleteProviderRecord = () => {
     setDeleting(true);
     setDeleteError("");
@@ -872,18 +935,17 @@ function ProviderRecord() {
         setDeleteError(error.message || "We could not delete this provider record.");
       });
   };
-  return <><RecordShell type="provider" record={record} title={value(data.name, "Provider record")} entityId={entityId} recordId={providerId} issues={issues}>
+  return <><RecordShell type="provider" record={record} title={value(data.name, "Provider record")} entityId={entityId} recordId={providerId} issues={issues} locations={locations} actions={canEdit ? <DetailActionsMenu actionLabel="Delete provider" onAction={() => setDeleteDialogOpen(true)} /> : null}>
     <section className="record-section identity-section"><SectionHeading eyebrow="Provider plan data" title="Provider profile" onEdit={edit("profile")} /><div className="identity-grid"><Info label="Provider type" value={data.provider_type} empty="Provider type not captured" /><Info label="First name" value={data.first_name || data.name?.split(" ")?.[0]} empty="First name not captured" /><Info label="Middle name" value={data.middle_name} empty="Middle name not captured" /><Info label="Last name" value={data.last_name || data.name?.split(" ")?.slice(-1)?.[0]} empty="Last name not captured" /><Info label="Gender" value={data.gender} empty="Gender not captured" /><Info label="Date of birth" value={data.date_of_birth || data.dob} empty="Date of birth not captured" /><Info label="NPI" value={data.npi} empty="NPI not captured" /><Info label="CAQH ID" value={data.caqh_id} empty="CAQH ID not captured" /></div></section>
     <section className="record-section"><SectionHeading eyebrow="Contact" title="Provider address" onEdit={edit("address")} /><p className="record-copy">{addressLabel(data.address || data.provider_address)}</p></section>
-    <section className="record-section"><SectionHeading eyebrow="Care delivery" title="Locations" onEdit={edit("provider_locations")} /><LocationCards locations={locations} /></section>
-    <section className="record-section"><SectionHeading eyebrow="Practice network" title="Affiliated practices" /><AffiliatedPracticesTable affiliations={affiliations} entityId={entityId} /></section>
+    <section className="record-section"><SectionHeading eyebrow="Care delivery" title="Locations" onEdit={canEdit && affiliations.length ? () => setLinkedLocationDialogOpen(true) : undefined} /><LocationCards locations={locations} /></section>
+    <section className="record-section"><SectionHeading eyebrow="Practice network" title="Affiliated practices" onEdit={canEdit ? () => setAffiliationsDialogOpen(true) : undefined} /><AffiliatedPracticesTable affiliations={affiliations} entityId={entityId} /></section>
     <section className="record-section"><SectionHeading eyebrow="Credentials" title="Licenses" onEdit={edit("licenses")} /><LicenseTable licenses={licenses} /></section>
     <section className="record-section"><SectionHeading eyebrow="Expertise" title="Specialties" onEdit={edit("specialties")} /><SpecialtyCards specialties={specialties} /></section>
     <section className="record-section"><SectionHeading eyebrow="Training" title="Education" onEdit={edit("education")} /><EducationTimeline records={education} /></section>
     <section className="record-section"><SectionHeading eyebrow="Risk" title="Liability insurance" onEdit={edit("liability_insurance")} /><InsuranceCards policies={insurance} /></section>
     <section className="record-section"><SectionHeading eyebrow="Network" title="Payer enrollment" onEdit={edit("payer_enrollments")} /><PayerTable payers={payers} /></section>
-    {canEdit && <section className="record-section provider-danger-zone"><p className="eyebrow">Danger zone</p><h2>Delete provider record</h2><p className="record-copy">Permanently remove this provider, their affiliations, issues, source revisions, and identity mappings from this workspace.</p><button className="secondary-button provider-delete-button" type="button" onClick={() => setDeleteDialogOpen(true)}>Delete provider</button></section>}
-  </RecordShell>{(saveMessage || saveError) && <p className={`record-operation-notice ${saveError ? "is-error" : ""}`} role={saveError ? "alert" : "status"}>{saveError || saveMessage}</p>}{editingSection && <SectionEditDialog type="provider" section={editingSection} record={record} onClose={() => setEditingSection(null)} onSave={saveSection} />}{deleteDialogOpen && <ProviderDeleteDialog providerName={value(data.name, "this provider")} deleting={deleting} error={deleteError} onCancel={() => !deleting && setDeleteDialogOpen(false)} onDelete={deleteProviderRecord} />}</>;
+  </RecordShell>{(saveMessage || saveError) && <p className={`record-operation-notice ${saveError ? "is-error" : ""}`} role={saveError ? "alert" : "status"}>{saveError || saveMessage}</p>}{editingSection && <SectionEditDialog type="provider" section={editingSection} record={record} onClose={() => setEditingSection(null)} onSave={saveSection} />}{linkedLocationDialogOpen && <ProviderPracticeLocationLinkDialog entityId={entityId} providerId={providerId} affiliations={affiliations} restrictToAffiliations onClose={() => setLinkedLocationDialogOpen(false)} onSave={savePracticeLocationLink} onUnlinkPractice={unlinkPractice} />}{affiliationsDialogOpen && <ProviderPracticeLocationLinkDialog entityId={entityId} providerId={providerId} affiliations={affiliations} onClose={() => setAffiliationsDialogOpen(false)} onSave={savePracticeLocationLink} onUnlinkPractice={unlinkPractice} />}{deleteDialogOpen && <ProviderDeleteDialog providerName={value(data.name, "this provider")} deleting={deleting} error={deleteError} onCancel={() => !deleting && setDeleteDialogOpen(false)} onDelete={deleteProviderRecord} />}</>;
 }
 
 function ProviderDeleteDialog({ providerName, deleting, error, onCancel, onDelete }) {
@@ -910,12 +972,13 @@ function PracticeRecord() {
   const [optimisticRecord, setOptimisticRecord] = useState(null);
   const [saveMessage, setSaveMessage] = useState("");
   const [saveError, setSaveError] = useState("");
+  const [providerLinksDialogOpen, setProviderLinksDialogOpen] = useState(false);
   const saveSequence = useRef(0);
   const record = optimisticRecord || request.data?.group || request.data;
   const issues = recordIssues(record);
   const canEdit = EDITABLE_RECORD_ROLES.has(workspace?.user?.role);
   useEffect(() => { if (record) document.title = `${value(record.legal_name || record.name, "Practice")} | Cozema Health`; }, [record]);
-  useEffect(() => { setOptimisticRecord(null); setSaveMessage(""); setSaveError(""); }, [groupId]);
+  useEffect(() => { setOptimisticRecord(null); setSaveMessage(""); setSaveError(""); setProviderLinksDialogOpen(false); }, [groupId]);
   if (request.loading) return <RecordLoading />;
   if (request.error) return <RecordError error={request.error} />;
   const edit = (section) => canEdit ? () => setEditingSection(section) : undefined;
@@ -939,28 +1002,57 @@ function PracticeRecord() {
         setSaveError(`${error.message || "We could not save your changes."} Your prior values have been restored.`);
       });
   };
-  return <><RecordShell type="practice" record={record} title={value(record?.legal_name || record?.name, "Practice record")} entityId={entityId} recordId={groupId} issues={issues}>
+  const saveProviderLocationLink = async (providerId, locationIds) => {
+    setSaveError("");
+    setSaveMessage("Saving provider location assignment...");
+    try {
+      const savedRecord = await fetchJson(entityPath(entityId, `/groups/${encodeURIComponent(groupId)}/providers/${encodeURIComponent(providerId)}`), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ location_ids: locationIds }),
+      });
+      setOptimisticRecord(savedRecord);
+      setSaveMessage("Provider location assignment saved.");
+    } catch (error) {
+      setSaveMessage("");
+      setSaveError(error.message || "We could not save this provider location assignment.");
+      throw error;
+    }
+  };
+  const unlinkProvider = async (providerId) => {
+    setSaveError("");
+    setSaveMessage("Unlinking provider...");
+    try {
+      const savedRecord = await fetchJson(entityPath(entityId, `/groups/${encodeURIComponent(groupId)}/providers/${encodeURIComponent(providerId)}`), { method: "DELETE" });
+      setOptimisticRecord(savedRecord);
+      setSaveMessage("Provider unlinked.");
+    } catch (error) {
+      setSaveMessage("");
+      setSaveError(error.message || "We could not unlink this provider.");
+      throw error;
+    }
+  };
+  return <><RecordShell type="practice" record={record} title={value(record?.legal_name || record?.name, "Practice record")} entityId={entityId} recordId={groupId} issues={issues} locations={record.locations || []}>
     <section className="record-section identity-section"><SectionHeading eyebrow="Organization" title="Practice profile" onEdit={edit("profile")} /><div className="identity-grid"><Info label="Legal name" value={record.legal_name || record.name} empty="Legal name not captured" /><Info label="DBA" value={record.dba} empty="DBA not captured" /><Info label="Type 2 NPI" value={record.type_2_npi} empty="Type 2 NPI not captured" /><Info label="Tax ID number" value={record.tax_id_number || record.tax_id} empty="Tax ID number not captured" /></div></section>
     <section className="record-section"><SectionHeading eyebrow="Care delivery" title="Locations" onEdit={edit("locations")} /><LocationCards locations={record.locations || []} /></section>
-    <section className="record-section"><SectionHeading eyebrow="Provider network" title="Linked providers" /><LinkedProvidersTable providers={record.providers || []} entityId={entityId} /></section>
+    <section className="record-section"><SectionHeading eyebrow="Provider network" title="Linked providers" onEdit={canEdit ? () => setProviderLinksDialogOpen(true) : undefined} /><LinkedProvidersTable providers={record.providers || []} locations={record.locations || []} entityId={entityId} /></section>
     <section className="record-section"><SectionHeading eyebrow="Primary source" title="W-9 information" onEdit={edit("w9")} />{record.w_9 || record.w9 ? <div className="source-card"><strong>{value(record.w_9?.file_name || record.w9?.file_name, "W-9 source")}</strong></div> : <div className="empty-inline">No W-9 information has been captured yet.</div>}</section>
-  </RecordShell>{(saveMessage || saveError) && <p className={`record-operation-notice ${saveError ? "is-error" : ""}`} role={saveError ? "alert" : "status"}>{saveError || saveMessage}</p>}{editingSection && <SectionEditDialog type="practice" section={editingSection} record={record} onClose={() => setEditingSection(null)} onSave={saveSection} />}</>;
+  </RecordShell>{(saveMessage || saveError) && <p className={`record-operation-notice ${saveError ? "is-error" : ""}`} role={saveError ? "alert" : "status"}>{saveError || saveMessage}</p>}{editingSection && <SectionEditDialog type="practice" section={editingSection} record={record} onClose={() => setEditingSection(null)} onSave={saveSection} />}{providerLinksDialogOpen && <ProviderLocationLinkDialog entityId={entityId} groupId={groupId} providers={record.providers || []} locations={record.locations || []} onClose={() => setProviderLinksDialogOpen(false)} onSave={saveProviderLocationLink} onUnlinkProvider={unlinkProvider} />}</>;
 }
 
 function RecordLoading() { return <main className="record-state-page"><div className="record-loading"><span className="spinner" />Loading record...</div></main>; }
 function RecordError({ error }) { return <main className="record-state-page"><section className="record-error"><p className="eyebrow">Record unavailable</p><h1>We could not load this record.</h1><p className="lede">{error.message}</p></section></main>; }
 
-function RecordShell({ type, record, title, entityId, recordId, issues, children }) {
+function RecordShell({ type, record, title, entityId, recordId, issues, locations = [], actions, children }) {
   const navigate = useNavigate();
   const activityPath = href(`/activity/view?record_id=${encodeURIComponent(recordId)}&record_type=${type}`, entityId);
-  return <div className="record-page"><header className="record-topbar"><Link className="brand" to={href("/", entityId)}><span className="brand-mark">C</span><span><BrandWordmark /></span></Link><Link className="back-link" to={href(type === "practice" ? "/practices/view" : "/providers/view", entityId)}>Back to {type === "practice" ? "practices" : "providers"}</Link></header><main className="record-content"><section className="record-hero"><div className="record-hero-heading"><div><p className="eyebrow">{type === "practice" ? "Practice / group" : "Provider record"}</p><h1>{title}</h1><p className="lede">{type === "practice" ? "Organization credentialing profile" : "Provider credentialing profile"}</p></div></div><nav className="record-tabs"><a href="#profile">{type === "practice" ? "Practice profile" : "Provider profile"}</a><a href="#issues">Open issues</a><a href={activityPath}>Revision history</a></nav></section><div className="record-layout"><div className="record-sections" id="profile">{children}</div><aside className="record-aside"><section className="aside-card"><p className="eyebrow">At a glance</p><Info label="Open issues" value={issues.length} /><Info label="Locations" value={(record.locations || providerData(record).locations || []).length} /><Link className="aside-link" to={activityPath}>View revision history</Link></section><section className="aside-card" id="issues"><p className="eyebrow">Record integrity</p><h2>Open issues</h2><div className="record-issues">{issues.length ? issues.map((issue, index) => <button type="button" key={`${issue.id || issueLabel(issue)}-${index}`} className="record-issue" onClick={() => navigate(href(`/${type === "practice" ? "practices" : "providers"}/${encodeURIComponent(recordId)}/issues/${encodeURIComponent(issue.id)}/view`, entityId))}><strong>{issueLabel(issue)}</strong><span className="issue-tags"><span className={`severity-tag severity-${issue.severity}`}>{value(issue.severity, "high")}</span><span className={`issue-type-tag issue-type-${issue.type}`}>{issueTypeLabel(issue.type)}</span></span><b>View issue</b></button>) : <div className="empty-inline">No open issues.</div>}</div></section></aside></div></main></div>;
+  return <div className="record-page"><header className="record-topbar"><Link className="brand" to={href("/", entityId)}><span className="brand-mark">C</span><span><BrandWordmark /></span></Link></header><main className="record-content"><section className="record-hero"><div className="record-hero-heading"><div><p className="eyebrow">{type === "practice" ? "Practice / group" : "Provider record"}</p><h1>{title}</h1><p className="lede">{type === "practice" ? "Organization credentialing profile" : "Provider credentialing profile"}</p></div>{actions}</div><nav className="record-tabs"><a href="#profile">{type === "practice" ? "Practice profile" : "Provider profile"}</a><a href="#issues">Open issues</a><a href={activityPath}>Revision history</a></nav></section><div className="record-layout"><div className="record-sections" id="profile">{children}</div><aside className="record-aside"><section className="aside-card"><p className="eyebrow">At a glance</p><Info label="Open issues" value={issues.length} /><Info label="Locations" value={locations.length} /><Link className="aside-link" to={activityPath}>View revision history</Link></section><section className="aside-card" id="issues"><p className="eyebrow">Record integrity</p><h2>Open issues</h2><div className="record-issues">{issues.length ? issues.map((issue, index) => <button type="button" key={`${issue.id || issueLabel(issue)}-${index}`} className="record-issue" onClick={() => navigate(href(`/${type === "practice" ? "practices" : "providers"}/${encodeURIComponent(recordId)}/issues/${encodeURIComponent(issue.id)}/view`, entityId))}><strong>{issueLabel(issue)}</strong><span className="issue-tags"><span className={`severity-tag severity-${issue.severity}`}>{value(issue.severity, "high")}</span><span className={`issue-type-tag issue-type-${issue.type}`}>{issueTypeLabel(issue.type)}</span></span><b>View issue</b></button>) : <div className="empty-inline">No open issues.</div>}</div></section></aside></div></main></div>;
 }
 
 const SECTION_EDIT_CONFIG = {
   provider: {
     profile: { title: "Provider profile", fields: [["provider_type", "Provider type"], ["first_name", "First name"], ["middle_name", "Middle name"], ["last_name", "Last name"], ["gender", "Gender"], ["date_of_birth", "Date of birth"], ["npi", "NPI"], ["caqh_id", "CAQH ID"]] },
     address: { title: "Provider address", fields: [["address", "Address"]] },
-    provider_locations: { title: "Locations", collection: "provider_locations", fields: [["display_name", "Location name"], ["type", "Location type"], ["address", "Address"], ["phone", "Phone"], ["email", "Email"], ["practice_hours", "Practice hours"], ["faxes", "Fax"]] },
     licenses: { title: "Licenses", collection: "licenses", fields: [["type", "License type"], ["license_number", "License number"], ["state", "State"], ["issue_date", "Issue date"], ["expiration_date", "Expiration date"]] },
     specialties: { title: "Specialties", collection: "specialties", fields: [["name", "Specialty"], ["board_certified", "Board certified", "boolean"], ["board", "Certifying board"], ["expiration_date", "Expiration date"]] },
     education: { title: "Education", collection: "education", fields: [["education_type", "Education type"], ["institution_name", "Institution"], ["degree", "Degree"], ["specialty", "Specialty"], ["start_date", "Start date"], ["end_date", "End date"]] },
@@ -974,7 +1066,7 @@ const SECTION_EDIT_CONFIG = {
   },
 };
 
-function SectionEditDialog({ type, section, record, onClose, onSave }) {
+function SectionEditDialog({ type, section, record, onClose, onSave, onLinkExistingLocation }) {
   const config = SECTION_EDIT_CONFIG[type][section];
   const source = type === "provider" ? providerData(record) : record;
   const initialItems = config.collection ? (record?.[config.collection] || []) : [];
@@ -1041,15 +1133,156 @@ function SectionEditDialog({ type, section, record, onClose, onSave }) {
       setSaving(false);
     }
   };
-  return <div className="record-edit-backdrop" role="presentation"><form className="record-edit-dialog" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="edit-record-title"><div className="record-edit-header"><div><p className="eyebrow">Manual correction</p><h2 id="edit-record-title">Edit {config.title}</h2><p>Changes are recorded in revision history as a manual update.</p></div><button className="dialog-close" type="button" onClick={onClose} aria-label="Close edit dialog">×</button></div>{config.collection ? <div className="record-edit-collection">{items.map((item, index) => <fieldset key={index}><legend>{config.title} {index + 1}</legend><button className="text-button danger-button collection-remove" type="button" onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}>Remove</button><div className="record-edit-fields">{config.fields.map(([key, label, inputType]) => <SectionEditField key={key} label={label} type={inputType} value={item[key]} onChange={(nextValue) => updateItem(index, key, nextValue)} />)}</div></fieldset>)}<button className="secondary-button collection-add" type="button" onClick={addItem}>Add entry <span>+</span></button></div> : <div className="record-edit-fields">{config.fields.map(([key, label, inputType]) => <SectionEditField key={key} label={label} type={inputType} value={values[key]} onChange={(nextValue) => setValues((current) => ({ ...current, [key]: nextValue }))} />)}</div>}{error && <p className="record-edit-error" role="alert">{error}</p>}<div className="record-edit-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Saving..." : "Save changes"}</button></div></form></div>;
+  return <div className="record-edit-backdrop" role="presentation"><form className="record-edit-dialog" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="edit-record-title"><div className="record-edit-header"><div><p className="eyebrow">Manual correction</p><h2 id="edit-record-title">Edit {config.title}</h2><p>Changes are recorded in revision history as a manual update.</p></div><button className="dialog-close" type="button" onClick={onClose} aria-label="Close edit dialog">×</button></div>{config.collection ? <div className="record-edit-collection">{items.map((item, index) => <fieldset key={index}><legend>{config.title} {index + 1}</legend><button className="text-button danger-button collection-remove" type="button" onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}>Remove</button><div className="record-edit-fields">{config.fields.map(([key, label, inputType]) => <SectionEditField key={key} label={label} type={inputType} value={item[key]} onChange={(nextValue) => updateItem(index, key, nextValue)} />)}</div></fieldset>)}<div className="record-edit-collection-actions"><button className="secondary-button collection-add" type="button" onClick={addItem}>Add entry <span>+</span></button>{onLinkExistingLocation && <button className="secondary-button" type="button" onClick={onLinkExistingLocation}>Link existing location</button>}</div></div> : <div className="record-edit-fields">{config.fields.map(([key, label, inputType]) => <SectionEditField key={key} label={label} type={inputType} value={values[key]} onChange={(nextValue) => setValues((current) => ({ ...current, [key]: nextValue }))} />)}</div>}{error && <p className="record-edit-error" role="alert">{error}</p>}<div className="record-edit-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving}>{saving ? "Saving..." : "Save changes"}</button></div></form></div>;
 }
 
 function SectionEditField({ label, type, value: fieldValue, onChange }) { return <label>{label}{type === "boolean" ? <select value={fieldValue} onChange={(event) => onChange(event.target.value)}><option value="true">Yes</option><option value="false">No</option></select> : <input value={fieldValue} onChange={(event) => onChange(event.target.value)} inputMode={label.includes("NPI") ? "numeric" : undefined} />}</label>; }
 
+function ProviderLocationLinkDialog({ entityId, groupId, providers: linkedProviders, locations, onClose, onSave, onUnlinkProvider }) {
+  const providersRequest = useRequest(entityPath(entityId, "/providers?limit=500"));
+  const [providerId, setProviderId] = useState("");
+  const [locationIds, setLocationIds] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const linkedProvidersById = new Map(linkedProviders.map((provider) => [provider.id, provider]));
+  const providers = [...(providersRequest.data?.providers || [])].sort((left, right) => recordName(left).localeCompare(recordName(right)));
+  const selectedProvider = providers.find((provider) => provider.id === providerId);
+  const isExistingLink = linkedProvidersById.has(providerId);
+  const selectProvider = (nextProviderId) => {
+    setProviderId(nextProviderId);
+    setLocationIds(linkedProvidersById.get(nextProviderId)?.location_ids || []);
+    setError("");
+  };
+  const toggleLocation = (locationId) => {
+    setLocationIds((current) => current.includes(locationId) ? current.filter((id) => id !== locationId) : [...current, locationId]);
+    setError("");
+  };
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!providerId) {
+      setError("Select a provider to link.");
+      return;
+    }
+    if (!locationIds.length) {
+      setError("Select at least one practice location.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await onSave(providerId, locationIds);
+      onClose();
+    } catch (requestError) {
+      setError(requestError.message || "We could not save this provider location assignment.");
+      setSaving(false);
+    }
+  };
+  const unlinkProvider = async () => {
+    if (!providerId || !isExistingLink) return;
+    setSaving(true);
+    setError("");
+    try {
+      await onUnlinkProvider(providerId);
+      onClose();
+    } catch (requestError) {
+      setError(requestError.message || "We could not unlink this provider.");
+      setSaving(false);
+    }
+  };
+  return <div className="record-edit-backdrop" role="presentation">
+    <form className="record-edit-dialog provider-location-link-dialog" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="link-provider-title">
+      <div className="record-edit-header"><div><p className="eyebrow">Provider network</p><h2 id="link-provider-title">Manage linked providers</h2><p>Choose a provider and the practice locations where they provide care. Changes are recorded in revision history.</p></div><button className="dialog-close" type="button" onClick={onClose} disabled={saving} aria-label="Close linked providers dialog">×</button></div>
+      {!locations.length ? <p className="record-edit-error" role="alert">Add a practice location before linking a provider.</p> : <>
+        <label className="relationship-location-select">Provider<select value={providerId} onChange={(event) => selectProvider(event.target.value)} disabled={providersRequest.loading || saving}><option value="">Select a provider</option>{providers.map((provider) => <option key={provider.id} value={provider.id}>{recordName(provider)}{linkedProvidersById.has(provider.id) ? " (linked)" : ""}</option>)}</select></label>
+        {providersRequest.loading && <InlineLoading text="Loading providers..." />}
+        {providersRequest.error && <p className="record-edit-error" role="alert">{providersRequest.error.message}</p>}
+        {selectedProvider && <p className="relationship-location-selected">{recordName(selectedProvider)}{value(providerData(selectedProvider).npi, "NPI not captured") !== "NPI not captured" ? ` · NPI ${providerData(selectedProvider).npi}` : ""}</p>}
+        <fieldset className="provider-location-checkboxes"><legend>Practice locations</legend>{locations.map((location) => <label key={location.id}><input type="checkbox" checked={locationIds.includes(location.id)} onChange={() => toggleLocation(location.id)} disabled={!providerId || saving} /><span><strong>{locationLabel(location)}</strong><small>{addressLabel(location.address || location)}</small></span></label>)}</fieldset>
+        {isExistingLink && <p className="relationship-location-help">Uncheck a location and save to unlink only that location from this provider.</p>}
+      </>}
+      {error && <p className="record-edit-error" role="alert">{error}</p>}
+      <div className="record-edit-actions">{isExistingLink && <button className="text-button danger-button relationship-unlink-button" type="button" onClick={unlinkProvider} disabled={saving}>Unlink provider</button>}<button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving || !providerId || !locationIds.length || !locations.length || providersRequest.loading || Boolean(providersRequest.error)}>{saving ? "Saving..." : isExistingLink ? "Save location assignment" : "Link provider"}</button></div>
+    </form>
+  </div>;
+}
+
+function ProviderPracticeLocationLinkDialog({ entityId, providerId, affiliations, restrictToAffiliations = false, onClose, onSave, onUnlinkPractice }) {
+  const groupsRequest = useRequest(restrictToAffiliations ? null : entityPath(entityId, "/groups?limit=500"));
+  const [groupId, setGroupId] = useState("");
+  const groupRequest = useRequest(groupId ? entityPath(entityId, `/groups/${encodeURIComponent(groupId)}`) : null);
+  const [locationIds, setLocationIds] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const groups = (restrictToAffiliations
+    ? affiliations.map((affiliation) => affiliation.group).filter(Boolean)
+    : groupsRequest.data?.groups || []
+  ).slice().sort((left, right) => value(left.legal_name || left.name).localeCompare(value(right.legal_name || right.name)));
+  const selectedGroup = groupRequest.data?.group || groupRequest.data;
+  const locations = selectedGroup?.locations || [];
+  const existingAffiliation = affiliations.find((affiliation) => affiliation.group?.id === groupId);
+  const selectGroup = (nextGroupId) => {
+    setGroupId(nextGroupId);
+    setLocationIds(affiliations.find((affiliation) => affiliation.group?.id === nextGroupId)?.location_ids || []);
+    setError("");
+  };
+  const toggleLocation = (locationId) => {
+    setLocationIds((current) => current.includes(locationId) ? current.filter((id) => id !== locationId) : [...current, locationId]);
+    setError("");
+  };
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!groupId) {
+      setError("Select a practice to link.");
+      return;
+    }
+    if (!locationIds.length) {
+      setError("Select at least one practice location.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await onSave(groupId, locationIds);
+      onClose();
+    } catch (requestError) {
+      setError(requestError.message || "We could not save this practice location assignment.");
+      setSaving(false);
+    }
+  };
+  const unlinkPractice = async () => {
+    if (!groupId || !existingAffiliation) return;
+    setSaving(true);
+    setError("");
+    try {
+      await onUnlinkPractice(groupId);
+      onClose();
+    } catch (requestError) {
+      setError(requestError.message || "We could not unlink this practice.");
+      setSaving(false);
+    }
+  };
+  return <div className="record-edit-backdrop" role="presentation">
+    <form className="record-edit-dialog provider-location-link-dialog" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="link-practice-title">
+      <div className="record-edit-header"><div><p className="eyebrow">Practice network</p><h2 id="link-practice-title">{restrictToAffiliations ? "Link an affiliated-practice location" : "Manage affiliated practices"}</h2><p>{restrictToAffiliations ? "Choose a location that already belongs to one of this provider's affiliated practices." : "Choose a practice and the locations where this provider provides care. Changes are recorded in revision history."}</p></div><button className="dialog-close" type="button" onClick={onClose} disabled={saving} aria-label="Close affiliated practices dialog">×</button></div>
+      <label className="relationship-location-select">Practice<select value={groupId} onChange={(event) => selectGroup(event.target.value)} disabled={(!restrictToAffiliations && groupsRequest.loading) || saving}><option value="">Select a practice</option>{groups.map((group) => <option key={group.id} value={group.id}>{value(group.legal_name || group.name, "Practice name not captured")}{!restrictToAffiliations && affiliations.some((affiliation) => affiliation.group?.id === group.id) ? " (linked)" : ""}</option>)}</select></label>
+      {!restrictToAffiliations && groupsRequest.loading && <InlineLoading text="Loading practices..." />}
+      {!restrictToAffiliations && groupsRequest.error && <p className="record-edit-error" role="alert">{groupsRequest.error.message}</p>}
+      {groupId && groupRequest.loading && <InlineLoading text="Loading practice locations..." />}
+      {groupRequest.error && <p className="record-edit-error" role="alert">{groupRequest.error.message}</p>}
+      {selectedGroup && <p className="relationship-location-selected">{value(selectedGroup.legal_name || selectedGroup.name, "Practice name not captured")}{selectedGroup.type_2_npi ? ` · Type 2 NPI ${selectedGroup.type_2_npi}` : ""}</p>}
+      {groupId && !groupRequest.loading && !groupRequest.error && !locations.length && <p className="record-edit-error" role="alert">Add a practice location before linking this provider.</p>}
+      {locations.length > 0 && <fieldset className="provider-location-checkboxes"><legend>Practice locations</legend>{locations.map((location) => <label key={location.id}><input type="checkbox" checked={locationIds.includes(location.id)} onChange={() => toggleLocation(location.id)} disabled={saving} /><span><strong>{locationLabel(location)}</strong><small>{addressLabel(location.address || location)}</small></span></label>)}</fieldset>}
+      {existingAffiliation && <p className="relationship-location-help">Uncheck a location and save to unlink only that location from this provider.</p>}
+      {error && <p className="record-edit-error" role="alert">{error}</p>}
+      <div className="record-edit-actions">{existingAffiliation && <button className="text-button danger-button relationship-unlink-button" type="button" onClick={unlinkPractice} disabled={saving}>Unlink practice</button>}<button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving || !groupId || !locationIds.length || !locations.length || groupRequest.loading || Boolean((!restrictToAffiliations && groupsRequest.error) || groupRequest.error)}>{saving ? "Saving..." : restrictToAffiliations ? "Link location" : existingAffiliation ? "Save location assignment" : "Link practice"}</button></div>
+    </form>
+  </div>;
+}
+
 function SectionHeading({ eyebrow, title, onEdit }) { return <div className="record-section-heading"><div><p className="eyebrow">{eyebrow}</p><h2>{title}</h2></div>{onEdit && <button className="section-edit-button" type="button" onClick={onEdit} aria-label={`Edit ${title}`} title={`Edit ${title}`}>✎</button>}</div>; }
 function Info({ label, value: item, empty }) { return <div className="info-row"><span>{label}</span><strong>{value(item, empty || `${label} not captured`)}</strong></div>; }
 function LocationCards({ locations }) { return locations?.length ? <div className="location-cards">{locations.map((location, index) => <article className="location-card" key={index}><span>{value(location.type, "Unknown")}</span><strong>{locationLabel(location)}</strong><p>{addressLabel(location.address || location)}</p>{location.phone && <p>{location.phone}</p>}{location.email && <p>{location.email}</p>}</article>)}</div> : <div className="empty-inline">No location information has been captured yet.</div>; }
-function LinkedProvidersTable({ providers, entityId }) { return <div className="detail-table-wrap"><table className="detail-table"><thead><tr><th>Provider</th><th>NPI</th><th>Provider type</th></tr></thead><tbody>{providers.length ? providers.map((provider) => <tr key={provider.id}><td><Link className="relationship-record-link" to={href(`/providers/${encodeURIComponent(provider.id)}/view`, entityId)}>{value(provider.name, "Provider name not captured")}</Link></td><td>{value(provider.npi, "NPI not captured")}</td><td>{value(provider.provider_type, "Provider type not captured")}</td></tr>) : <EmptyRow columns="3">No providers are linked to this practice yet.</EmptyRow>}</tbody></table></div>; }
+function LinkedProvidersTable({ providers, locations, entityId }) { const locationsById = new Map(locations.map((location) => [location.id, location])); return <div className="detail-table-wrap"><table className="detail-table"><thead><tr><th>Provider</th><th>NPI</th><th>Provider type</th><th>Locations</th></tr></thead><tbody>{providers.length ? providers.map((provider) => <tr key={provider.id}><td><Link className="relationship-record-link" to={href(`/providers/${encodeURIComponent(provider.id)}/view`, entityId)}>{value(provider.name, "Provider name not captured")}</Link></td><td>{value(provider.npi, "NPI not captured")}</td><td>{value(provider.provider_type, "Provider type not captured")}</td><td>{value((provider.location_ids || []).map((locationId) => locationLabel(locationsById.get(locationId))).filter((label) => label !== "Location not captured"), "No locations linked")}</td></tr>) : <EmptyRow columns="4">No providers are linked to this practice yet.</EmptyRow>}</tbody></table></div>; }
 function AffiliatedPracticesTable({ affiliations, entityId }) { return <div className="detail-table-wrap"><table className="detail-table"><thead><tr><th>Practice</th><th>Type 2 NPI</th><th>Locations</th></tr></thead><tbody>{affiliations.length ? affiliations.map((affiliation) => <tr key={affiliation.id || affiliation.group.id}><td><Link className="relationship-record-link" to={href(`/practices/${encodeURIComponent(affiliation.group.id)}/view`, entityId)}>{value(affiliation.group.legal_name || affiliation.group.name, "Practice name not captured")}</Link></td><td>{value(affiliation.group.type_2_npi, "Type 2 NPI not captured")}</td><td>{value(affiliation.locations?.map(locationLabel), "Location not captured")}</td></tr>) : <EmptyRow columns="3">This provider is not linked to a practice yet.</EmptyRow>}</tbody></table></div>; }
 function LicenseTable({ licenses }) { return <div className="provider-table-wrap"><table className="provider-table"><thead><tr><th>Type</th><th>License #</th><th>State</th><th>Issued</th><th>Expires</th></tr></thead><tbody>{licenses?.length ? licenses.map((license, index) => <tr key={index} className={expirationState(license.expiration_date || license.expires) ? "is-expired" : ""}><td>{value(license.type, "License type not captured")}</td><td>{value(license.license_number || license.number, "License number not captured")}</td><td>{value(license.state, "State not captured")}</td><td>{dateLabel(license.issue_date || license.issued)}</td><td className={expirationState(license.expiration_date || license.expires) ? "expiration-date is-expired" : ""}>{dateLabel(license.expiration_date || license.expires)}</td></tr>) : <EmptyRow columns="5">No license information has been captured yet.</EmptyRow>}</tbody></table></div>; }
 function SpecialtyCards({ specialties }) { return specialties?.length ? <div className="specialty-list">{specialties.map((specialty, index) => <article className="specialty-card" key={index}><strong>{value(specialty.name || specialty.specialty)}</strong><p>{specialty.board_certified ? "Board certified" : "Board certification not captured"}{specialty.board ? ` · ${specialty.board}` : ""}</p>{specialty.expiration_date && <p className={expirationState(specialty.expiration_date) ? "expiration-date is-expired" : ""}>Expires {dateLabel(specialty.expiration_date)}</p>}</article>)}</div> : <div className="empty-inline">No specialty information has been captured yet.</div>; }
@@ -1076,10 +1309,9 @@ function IssueDetail({ type }) {
   const navigate = useNavigate();
   const { providerId, groupId, issueId } = useParams();
   const recordId = type === "practice" ? groupId : providerId;
+  const recordPath = href(`/${type === "practice" ? "practices" : "providers"}/${encodeURIComponent(recordId)}/view`, entityId);
+  const dismissal = useIssueDismissal(entityId, { onDismissed: () => navigate(recordPath, { replace: true }) });
   const request = useRequest(entityPath(entityId, `/${type === "practice" ? "groups" : "providers"}/${encodeURIComponent(recordId)}/issues/${encodeURIComponent(issueId)}`));
-  const [removalOpen, setRemovalOpen] = useState(false);
-  const [removalError, setRemovalError] = useState("");
-  const [removing, setRemoving] = useState(false);
   const issue = request.data?.issue || request.data;
   const record = request.data?.record || request.data?.[type === "practice" ? "group" : "provider"] || issue?.record || {};
   useEffect(() => { if (issue) document.title = `${issueTypeLabel(issue.type)} | Cozema Health`; }, [issue]);
@@ -1087,20 +1319,8 @@ function IssueDetail({ type }) {
   if (request.error) return <RecordError error={request.error} />;
   const title = issueDetailLabel(issue);
   const recordTitle = type === "practice" ? value(record.legal_name || record.name, "Practice") : recordName(record, "Provider");
-  const recordPath = href(`/${type === "practice" ? "practices" : "providers"}/${encodeURIComponent(recordId)}/view`, entityId);
+  const dismissableIssue = { ...issue, record_type: type, recordId };
   const canManageIssues = EDITABLE_RECORD_ROLES.has(workspace?.user?.role);
-  const removeIssue = async () => {
-    setRemoving(true);
-    setRemovalError("");
-    const collection = type === "practice" ? "groups" : "providers";
-    try {
-      await fetchJson(entityPath(entityId, `/${collection}/${encodeURIComponent(recordId)}/issues/${encodeURIComponent(issue.id)}/remove`), { method: "POST" });
-      navigate(recordPath, { replace: true });
-    } catch (error) {
-      setRemovalError(error.message || "We could not remove this issue.");
-      setRemoving(false);
-    }
-  };
   return <div className="record-shell">
     <header className="record-topbar">
       <Link className="brand record-brand" to={href("/", entityId)}>
@@ -1115,13 +1335,16 @@ function IssueDetail({ type }) {
         <Link to={href("/", entityId)}>Dashboard</Link><span>/</span><Link to={recordPath}>{recordTitle}</Link><span>/</span><strong>Issue</strong>
       </nav>
       <section className="issue-hero">
-        <p className="eyebrow">Credentialing issue</p>
+        <div className="issue-hero-action-row">
+          <p className="eyebrow">Credentialing issue</p>
+          {canManageIssues && <DetailActionsMenu actionLabel="Dismiss issue" onAction={() => dismissal.requestDismissal(dismissableIssue)} />}
+        </div>
         <div className="issue-hero-heading">
           <h1>{title}</h1>
-          <div className="issue-hero-tags">
-            <span className={`severity-tag severity-${issue.severity}`}>{capitalizeLabel(value(issue.severity, "high"))}</span>
-            <span className={`issue-type-tag issue-type-${issue.type}`}>{capitalizeLabel(issueTypeLabel(issue.type))}</span>
-          </div>
+        </div>
+        <div className="issue-hero-tags">
+          <span className={`severity-tag severity-${issue.severity}`}>{capitalizeLabel(value(issue.severity, "high"))}</span>
+          <span className={`issue-type-tag issue-type-${issue.type}`}>{capitalizeLabel(issueTypeLabel(issue.type))}</span>
         </div>
         <p className="lede">{issue.description || (issue.type === "missing_data" ? `${fieldLabel(issue.field_path || issue.affected_fields?.[0])} requires attention because it has not been captured.` : title)}</p>
       </section>
@@ -1134,19 +1357,13 @@ function IssueDetail({ type }) {
         <Info label="Issue type" value={capitalizeLabel(issueTypeLabel(issue.type))} />
         <Info label="Severity" value={capitalizeLabel(issue.severity)} />
       </section>
-      {canManageIssues && <section className="record-section provider-danger-zone issue-danger-zone">
-        <p className="eyebrow">Danger zone</p>
-        <h2>Remove issue</h2>
-        <p className="record-copy">Hide this issue from open-issue counts, lists, reports, and expiration follow-up. The underlying credentialing data and audit trail remain unchanged.</p>
-        <button className="secondary-button provider-delete-button" type="button" onClick={() => { setRemovalError(""); setRemovalOpen(true); }}>Remove issue</button>
-      </section>}
     </main>
-    <IssueRemovalDialog
-      issue={removalOpen ? issue : null}
-      error={removalError}
-      saving={removing}
-      onCancel={() => { if (!removing) setRemovalOpen(false); }}
-      onConfirm={removeIssue}
+    <IssueDismissalDialog
+      issue={dismissal.pendingIssue}
+      error={dismissal.error}
+      saving={dismissal.saving}
+      onCancel={dismissal.cancelDismissal}
+      onConfirm={dismissal.confirmDismissal}
     />
   </div>;
 }

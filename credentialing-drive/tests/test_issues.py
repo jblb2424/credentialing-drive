@@ -160,7 +160,7 @@ class ProviderIssueTests(unittest.TestCase):
                 "caqh_id": "12345",
                 "address": "1 Main Street",
             },
-            "provider_locations": [{
+            "locations": [{
                 "display_name": "Main Office",
                 "type": "primary",
                 "address": "1 Main Street",
