@@ -2,6 +2,7 @@ import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { Link, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AuthControls } from "./auth.jsx";
 import { entityPath, fetchJson, fetchWithAuth } from "./api.js";
+import { INTAKE_FOLDER_SELECTION_COPY, useIntakeFolderPicker } from "./intake-folder-picker.jsx";
 import { IssueDismissalDialog, IssueDismissButton, TrashIcon, useIssueDismissal } from "./issue-dismissal.jsx";
 import { ExpirationStatusTag, IssueStatusTags, issueRowClassName } from "./issue-presentation.jsx";
 import { useWorkspace } from "./workspace.jsx";
@@ -268,6 +269,10 @@ function Dashboard() {
   const driveConnected = Boolean(drive?.connected);
   const intakeFolderConfigured = Boolean(drive?.intake_folder_configured);
   const intakeReady = Boolean(drive?.intake_ready);
+  const { openFolderPicker, folderPicker } = useIntakeFolderPicker(entityId, () => {
+    connections.refresh();
+    setRefreshKey((key) => key + 1);
+  });
   const [connectingDrive, setConnectingDrive] = useState(false);
   const [connectionError, setConnectionError] = useState("");
   const startGoogleDriveConnection = () => {
@@ -286,7 +291,8 @@ function Dashboard() {
   useEffect(() => { document.title = "Credentialing Operations | Cozema Health"; }, []);
   return <Shell active="overview" refresh={() => setRefreshKey((key) => key + 1)}>
     <section className="hero"><p className="eyebrow">Credentialing overview</p><h1>{Greeting()}</h1></section>
-    {connectionReady && <section className="connection-banner"><div><p className="eyebrow">{intakeReady ? "AI credentialing intake" : intakeFolderConfigured ? "Document intake" : "Workspace setup"}</p><h2 className="connection-banner-title"><svg className="ai-sparkles-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3-1.9 5.1L5 10l5.1 1.9L12 17l1.9-5.1L19 10l-5.1-1.9L12 3Z" /><path d="m19 15-.8 2.2L16 18l2.2.8L19 21l.8-2.2L22 18l-2.2-.8L19 15Z" /><path d="m5 15-.55 1.45L3 17l1.45.55L5 19l.55-1.45L7 17l-1.45-.55L5 15Z" /></svg>{intakeReady ? "AI is handling your credentialing intake" : intakeFolderConfigured ? "Preparing your AI credentialing intake" : driveConnected ? "Finish setting up your intake folder" : "Connect your credentialing documents"}</h2><p>{intakeReady ? "Files added to your connected folder are transformed by AI into provider and practice records, with missing information, discrepancies, and expirations flagged for review." : intakeFolderConfigured ? <>Your Google Drive intake folder, <strong>{value(drive?.intake_folder_name, "your selected folder")}</strong>, is being prepared for AI intake. Files added here will be transformed into provider and practice records, with missing information, discrepancies, and expirations flagged for review.</> : driveConnected ? "Choose the Google Drive folder that should receive credentialing documents. Monitoring starts as soon as the folder is confirmed." : "Connect Google Drive to begin bringing new provider and practice documents into this workspace."}</p>{connectionError && <p className="connection-error" role="alert">{connectionError}</p>}</div>{!driveConnected && canManageDocuments ? <button className="primary-button" type="button" onClick={startGoogleDriveConnection} disabled={connectingDrive}>{connectingDrive ? "Opening Google..." : "Connect Google Drive"}</button> : <Link className="primary-button" to={href("/data-connections/view", entityId)}>{intakeReady || intakeFolderConfigured ? "View data connections" : driveConnected && canManageDocuments ? "Choose intake folder" : "View data connections"}</Link>}</section>}
+    {connectionReady && <section className="connection-banner"><div><p className="eyebrow">{intakeReady ? "AI credentialing intake" : intakeFolderConfigured ? "Document intake" : "Workspace setup"}</p><h2 className="connection-banner-title"><svg className="ai-sparkles-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3-1.9 5.1L5 10l5.1 1.9L12 17l1.9-5.1L19 10l-5.1-1.9L12 3Z" /><path d="m19 15-.8 2.2L16 18l2.2.8L19 21l.8-2.2L22 18l-2.2-.8L19 15Z" /><path d="m5 15-.55 1.45L3 17l1.45.55L5 19l.55-1.45L7 17l-1.45-.55L5 15Z" /></svg>{intakeReady ? "AI is handling your credentialing intake" : intakeFolderConfigured ? "Preparing your AI credentialing intake" : driveConnected ? "Finish setting up your intake folder" : "Connect your credentialing documents"}</h2><p>{intakeReady ? "Files added to your connected folder are transformed by AI into provider and practice records, with missing information, discrepancies, and expirations flagged for review." : intakeFolderConfigured ? <>Your Google Drive intake folder, <strong>{value(drive?.intake_folder_name, "your selected folder")}</strong>, is being prepared for AI intake. Files added here will be transformed into provider and practice records, with missing information, discrepancies, and expirations flagged for review.</> : driveConnected ? INTAKE_FOLDER_SELECTION_COPY : "Connect Google Drive to begin bringing new provider and practice documents into this workspace."}</p>{connectionError && <p className="connection-error" role="alert">{connectionError}</p>}</div>{!driveConnected && canManageDocuments ? <button className="primary-button" type="button" onClick={startGoogleDriveConnection} disabled={connectingDrive}>{connectingDrive ? "Opening Google..." : "Connect Google Drive"}</button> : driveConnected && !intakeFolderConfigured && canManageDocuments ? <button className="primary-button" type="button" onClick={openFolderPicker}>Choose intake folder</button> : <Link className="primary-button" to={href("/data-connections/view", entityId)}>View data connections</Link>}</section>}
+    {folderPicker}
     <section className="metrics" aria-label="Credentialing summary">
       <Link className="metric-card metric-link" to={href("/practices/view", entityId)}><p>Practices</p>{groups.loading ? <LoadingCount label="practices" /> : <strong>{groups.error ? "Unavailable" : groupRecords.length}</strong>}<span>Browse all practices</span></Link>
       <Link className="metric-card metric-primary metric-link" to={href("/providers/view", entityId)}><p>Provider records</p>{providers.loading ? <LoadingCount label="providers" /> : <strong>{providers.error ? "Unavailable" : providerRecords.length}</strong>}<span>Browse all provider records</span></Link>
@@ -655,7 +661,7 @@ function LegacyDataConnections() {
     startMonitoring();
   }, [drive?.connected, drive?.intake_folder_configured, drive?.watching, canManageDocuments]);
   useEffect(() => { document.title = "Data connections | Cozema Health"; }, []);
-  return <Shell active="connections"><section className="workspace-hero"><p className="eyebrow">Workspace setup</p><h1>Data connections</h1><p className="lede">Securely connect the document sources this client uses for credentialing intake.</p></section><section className="workspace-panel connection-panel"><div className="section-heading"><div><p className="eyebrow">Document source</p><h2>Google Drive</h2></div><span className={`connection-status ${drive?.connected ? "is-connected" : ""}`}>{drive?.connected ? "Connected" : "Not connected"}</span></div>{connectionRequest.loading ? <div className="loading-row"><span className="spinner" />Checking Google Drive connection...</div> : connectionRequest.error ? <div className="empty-state">{connectionRequest.error.message}</div> : <div className="connection-content"><div className="connection-copy">{!drive?.connected && <p>Authorize the Google account that owns this client's credentialing intake folder.</p>}<div className="ai-intake-note"><span className="ai-magic-mark" aria-hidden="true">✦</span><div><strong>AI-assisted intake</strong><p>Once connected, files added to this Drive are read and sorted by AI into the appropriate provider and practice records. Review any flagged issues before relying on the data.</p></div></div>{drive?.connected && <dl className="connection-details"><div><dt>Intake folder</dt><dd>{drive.intake_folder_configured ? value(drive.intake_folder_name, "Selected folder") : "Not selected yet"}</dd></div><div><dt>Document monitoring</dt><dd>{drive.watching ? "Active" : startingMonitoring ? "Activating..." : drive.intake_folder_configured ? "Activating..." : "Starts after folder selection"}</dd></div></dl>}{params.get("connected") === "google-drive" && <p className="connection-success" role="status">Google Drive connected successfully. Choose the intake folder next.</p>}{connectionMessage && <p className="connection-success" role="status">{connectionMessage}</p>}{connectionError && <p className="connection-error" role="alert">{connectionError}</p>}</div><div className="connection-actions">{canManageDocuments && !drive?.connected && <button className="primary-button" type="button" onClick={startConnection} disabled={connecting}>{connecting ? "Opening Google..." : "Connect Google Drive"}</button>}{canManageDocuments && drive?.connected && <div className="connection-manage-actions">{drive.intake_folder_configured ? <button className="secondary-button" type="button" onClick={openFolderPicker}>Change intake folder</button> : <button className="primary-button" type="button" onClick={openFolderPicker}>Choose intake folder</button>}{confirmingDisconnect ? <div className="connection-confirmation"><p>Disconnect this Google Drive? New files will no longer be monitored or imported.</p><div><button className="secondary-button" type="button" onClick={() => setConfirmingDisconnect(false)} disabled={disconnecting}>Cancel</button><button className="primary-button danger-primary-button" type="button" onClick={disconnectDrive} disabled={disconnecting}>{disconnecting ? "Disconnecting..." : "Disconnect Drive"}</button></div></div> : <button className="text-button danger-button" type="button" onClick={() => setConfirmingDisconnect(true)}>Disconnect Drive</button>}</div>}{!canManageDocuments && !drive?.connected && <p className="connection-read-only">A workspace administrator or credentialing specialist can connect Google Drive.</p>}</div></div>}</section>{folderPickerOpen && <div className="folder-picker-backdrop" role="presentation"><section className="folder-picker" role="dialog" aria-modal="true" aria-labelledby="folder-picker-title"><div className="folder-picker-header"><div><p className="eyebrow">Google Drive</p><h2 id="folder-picker-title">Choose intake folder</h2><p>Select the folder whose new files should be processed for this client. Monitoring will start automatically.</p></div><button className="dialog-close" type="button" onClick={() => setFolderPickerOpen(false)} aria-label="Close folder picker">×</button></div><label className="folder-picker-search">Search folders<input type="search" value={folderQuery} onChange={(event) => setFolderQuery(event.target.value)} placeholder="Filter accessible Google Drive folders" autoFocus /></label><div className="folder-picker-list">{foldersLoading ? <InlineLoading text="Loading Google Drive folders..." /> : visibleFolders.length ? visibleFolders.map((folder) => <button className="folder-picker-option" type="button" key={folder.id} onClick={() => selectFolder(folder)} disabled={Boolean(selectingFolderId)}><span className="folder-picker-icon" aria-hidden="true">□</span><span><strong>{folder.name}</strong><small>{folder.modifiedTime ? `Modified ${shortDate(folder.modifiedTime)}` : "Google Drive folder"}</small></span>{selectingFolderId === folder.id && <span className="spinner" />}</button>) : <p className="folder-picker-empty">No accessible folders match that search.</p>}</div></section></div>}</Shell>;
+  return <Shell active="connections"><section className="workspace-hero"><p className="eyebrow">Workspace setup</p><h1>Data connections</h1><p className="lede">Securely connect the document sources this client uses for credentialing intake.</p></section><section className="workspace-panel connection-panel"><div className="section-heading"><div><p className="eyebrow">Document source</p><h2>Google Drive</h2></div><span className={`connection-status ${drive?.connected ? "is-connected" : ""}`}>{drive?.connected ? "Connected" : "Not connected"}</span></div>{connectionRequest.loading ? <div className="loading-row"><span className="spinner" />Checking Google Drive connection...</div> : connectionRequest.error ? <div className="empty-state">{connectionRequest.error.message}</div> : <div className="connection-content"><div className="connection-copy">{!drive?.connected && <p>Authorize the Google account that owns this client's credentialing intake folder.</p>}<div className="ai-intake-note"><span className="ai-magic-mark" aria-hidden="true">✦</span><div><strong>AI-assisted intake</strong><p>Once connected, files added to this Drive are read and sorted by AI into the appropriate provider and practice records. Review any flagged issues before relying on the data.</p></div></div>{drive?.connected && <dl className="connection-details"><div><dt>Intake folder</dt><dd>{drive.intake_folder_configured ? value(drive.intake_folder_name, "Selected folder") : "Not selected yet"}</dd></div><div><dt>Document monitoring</dt><dd>{drive.watching ? "Active" : startingMonitoring ? "Activating..." : drive.intake_folder_configured ? "Activating..." : "Starts after folder selection"}</dd></div></dl>}{params.get("connected") === "google-drive" && <p className="connection-success" role="status">Google Drive connected successfully. Choose the intake folder next.</p>}{connectionMessage && <p className="connection-success" role="status">{connectionMessage}</p>}{connectionError && <p className="connection-error" role="alert">{connectionError}</p>}</div><div className="connection-actions">{canManageDocuments && !drive?.connected && <button className="primary-button" type="button" onClick={startConnection} disabled={connecting}>{connecting ? "Opening Google..." : "Connect Google Drive"}</button>}{canManageDocuments && drive?.connected && <div className="connection-manage-actions">{drive.intake_folder_configured ? <button className="secondary-button" type="button" onClick={openFolderPicker}>Change intake folder</button> : <button className="primary-button" type="button" onClick={openFolderPicker}>Choose intake folder</button>}{confirmingDisconnect ? <div className="connection-confirmation"><p>Disconnect this Google Drive? New files will no longer be monitored or imported.</p><div><button className="secondary-button" type="button" onClick={() => setConfirmingDisconnect(false)} disabled={disconnecting}>Cancel</button><button className="primary-button danger-primary-button" type="button" onClick={disconnectDrive} disabled={disconnecting}>{disconnecting ? "Disconnecting..." : "Disconnect Drive"}</button></div></div> : <button className="text-button danger-button" type="button" onClick={() => setConfirmingDisconnect(true)}>Disconnect Drive</button>}</div>}{!canManageDocuments && !drive?.connected && <p className="connection-read-only">A workspace administrator or credentialing specialist can connect Google Drive.</p>}</div></div>}</section>{folderPickerOpen && <div className="folder-picker-backdrop" role="presentation"><section className="folder-picker" role="dialog" aria-modal="true" aria-labelledby="folder-picker-title"><div className="folder-picker-header"><div><p className="eyebrow">Google Drive</p><h2 id="folder-picker-title">Choose intake folder</h2><p>{INTAKE_FOLDER_SELECTION_COPY}</p></div><button className="dialog-close" type="button" onClick={() => setFolderPickerOpen(false)} aria-label="Close folder picker">×</button></div><label className="folder-picker-search">Search folders<input type="search" value={folderQuery} onChange={(event) => setFolderQuery(event.target.value)} placeholder="Filter accessible Google Drive folders" autoFocus /></label><div className="folder-picker-list">{foldersLoading ? <InlineLoading text="Loading Google Drive folders..." /> : visibleFolders.length ? visibleFolders.map((folder) => <button className="folder-picker-option" type="button" key={folder.id} onClick={() => selectFolder(folder)} disabled={Boolean(selectingFolderId)}><span className="folder-picker-icon" aria-hidden="true">□</span><span><strong>{folder.name}</strong><small>{folder.modifiedTime ? `Modified ${shortDate(folder.modifiedTime)}` : "Google Drive folder"}</small></span>{selectingFolderId === folder.id && <span className="spinner" />}</button>) : <p className="folder-picker-empty">No accessible folders match that search.</p>}</div></section></div>}</Shell>;
 }
 
 function DataConnections() {
@@ -668,17 +674,16 @@ function DataConnections() {
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
-  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
-  const [folders, setFolders] = useState([]);
-  const [foldersLoading, setFoldersLoading] = useState(false);
-  const [folderError, setFolderError] = useState("");
-  const [folderQuery, setFolderQuery] = useState("");
-  const [selectingFolderId, setSelectingFolderId] = useState("");
   const [repairingMonitoring, setRepairingMonitoring] = useState(false);
   const automaticMonitoringAttempt = useRef(false);
+  const connectionReturnHandled = useRef(false);
   const canManageDocuments = ["super_admin", "customer_admin", "credentialing_specialist"].includes(workspace?.user?.role);
   const drive = connectionRequest.data?.google_drive;
-  const visibleFolders = folders.filter((folder) => folder.name?.toLowerCase().includes(folderQuery.trim().toLowerCase()));
+  const returnedFromGoogleConnection = params.get("connected") === "google-drive";
+  const { openFolderPicker, folderPicker } = useIntakeFolderPicker(entityId, (folder) => {
+    setConnectionMessage(`${folder.name} is now the intake folder and monitoring is active.`);
+    connectionRequest.refresh();
+  });
 
   const startConnection = () => {
     setConnecting(true);
@@ -709,37 +714,14 @@ function DataConnections() {
       .finally(() => setDisconnecting(false));
   };
 
-  const openFolderPicker = () => {
-    setFolderPickerOpen(true);
-    setFoldersLoading(true);
-    setFolderQuery("");
-    setFolderError("");
-    setConnectionError("");
-    fetchJson(entityPath(entityId, "/drive/folders"))
-      .then((result) => setFolders(result.folders || []))
-      .catch((error) => setFolderError(error.message || "We could not load Google Drive folders."))
-      .finally(() => setFoldersLoading(false));
-  };
-
-  const selectFolder = (folder) => {
-    setSelectingFolderId(folder.id);
-    setFolderError("");
-    fetchJson(entityPath(entityId, "/drive/intake-folder"), {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folder_id: folder.id }),
-    })
-      .then(({ folder: selectedFolder, intake_ready: isReady }) => {
-        if (!isReady) throw new Error("Google Drive did not confirm document monitoring.");
-        setFolderPickerOpen(false);
-        setConnectionMessage(`${selectedFolder.name} is now the intake folder and monitoring is active.`);
-        connectionRequest.refresh();
-      })
-      .catch((error) => setFolderError(error.message || "We could not save the intake folder."))
-      .finally(() => setSelectingFolderId(""));
-  };
-
   useEffect(() => { document.title = "Data connections | Cozema Health"; }, []);
+
+  useEffect(() => {
+    if (!returnedFromGoogleConnection || !drive?.connected || drive.intake_folder_configured || !canManageDocuments || connectionReturnHandled.current) return;
+
+    connectionReturnHandled.current = true;
+    openFolderPicker();
+  }, [canManageDocuments, drive?.connected, drive?.intake_folder_configured, returnedFromGoogleConnection]);
 
   useEffect(() => {
     // Older connections may have a folder from before selection and monitoring
@@ -816,23 +798,7 @@ function DataConnections() {
         </div>
       </div>}
     </section>
-    {folderPickerOpen && <div className="folder-picker-backdrop" role="presentation">
-      <section className="folder-picker" role="dialog" aria-modal="true" aria-labelledby="folder-picker-title">
-        <div className="folder-picker-header">
-          <div>
-            <p className="eyebrow">Google Drive</p>
-            <h2 id="folder-picker-title">Choose intake folder</h2>
-            <p>Select the folder whose new files should be processed for this client. Monitoring starts automatically as part of this selection.</p>
-          </div>
-          <button className="dialog-close" type="button" onClick={() => setFolderPickerOpen(false)} aria-label="Close folder picker">×</button>
-        </div>
-        <label className="folder-picker-search">Search folders<input type="search" value={folderQuery} onChange={(event) => setFolderQuery(event.target.value)} placeholder="Filter accessible Google Drive folders" autoFocus /></label>
-        {folderError && <p className="connection-error folder-picker-error" role="alert">{folderError}</p>}
-        <div className="folder-picker-list">
-          {foldersLoading ? <InlineLoading text="Loading Google Drive folders..." /> : visibleFolders.length ? visibleFolders.map((folder) => <button className="folder-picker-option" type="button" key={folder.id} onClick={() => selectFolder(folder)} disabled={Boolean(selectingFolderId)}><span className="folder-picker-icon" aria-hidden="true">□</span><span><strong>{folder.name}</strong><small>{folder.modifiedTime ? `Modified ${shortDate(folder.modifiedTime)}` : "Google Drive folder"}</small></span>{selectingFolderId === folder.id && <span className="spinner" />}</button>) : <p className="folder-picker-empty">No accessible folders match that search.</p>}
-        </div>
-      </section>
-    </div>}
+    {folderPicker}
   </Shell>;
 }
 
