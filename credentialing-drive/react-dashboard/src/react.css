@@ -6,7 +6,9 @@
 
 .attention-row .attention-provider,
 .attention-row .attention-detail {
-  text-decoration: none;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
 
 .attention-row .attention-provider:hover,
@@ -503,6 +505,86 @@
   padding-bottom: 36px;
 }
 
+.discrepancy-panel {
+  margin: 0 0 24px;
+  padding: 25px;
+  border: 1px solid #d9e5ee;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.discrepancy-panel h2 {
+  margin: 5px 0 0;
+  font-size: 25px;
+}
+
+.discrepancy-panel > p:not(.eyebrow) {
+  margin: 9px 0 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.discrepancy-values {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 13px;
+  margin-top: 20px;
+  display: grid;
+}
+
+.discrepancy-value {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid #dfe9f0;
+  border-radius: 10px;
+  background: #fbfcfd;
+}
+
+.discrepancy-value-previous {
+  border-top: 3px solid #91a9bf;
+}
+
+.discrepancy-value-current {
+  border-top: 3px solid var(--pine);
+  background: #f5fbf8;
+}
+
+.discrepancy-value > span,
+.discrepancy-value > small {
+  display: block;
+  color: #829ab1;
+  font: 500 9px/1.3 "DM Mono", monospace;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.discrepancy-value > strong {
+  display: block;
+  margin: 10px 0 13px;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.discrepancy-value > small {
+  color: var(--ink-soft);
+  font-family: Manrope, sans-serif;
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+@media (max-width: 620px) {
+  .discrepancy-panel {
+    padding: 20px;
+  }
+
+  .discrepancy-values {
+    grid-template-columns: 1fr;
+  }
+}
+
 .issue-summary-record-link {
   display: block;
   margin-top: 9px;
@@ -510,13 +592,13 @@
   font-size: 12px;
   font-weight: 800;
   overflow-wrap: anywhere;
-  text-decoration: none;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
 
 .issue-summary-record-link:hover {
   color: var(--pine);
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 
 .issue-summary-record-link:focus-visible {
@@ -1312,13 +1394,13 @@
 .relationship-record-link {
   color: var(--ink);
   font-weight: 800;
-  text-decoration: none;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
 
 .relationship-record-link:hover {
   color: var(--pine);
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 
 .relationship-record-link:focus-visible {
@@ -1499,7 +1581,9 @@
   margin-top: 16px;
   font-size: 11px;
   font-weight: 800;
-  text-decoration: none;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
   display: inline-block;
 }
 

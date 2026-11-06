@@ -7,8 +7,18 @@ export function value(value, fallback = "Not captured") {
   return String(value);
 }
 
+export function textValue(input, fallback = "Not captured") {
+  const result = value(input, fallback);
+  if (result === fallback) return result;
+  return result
+    .replaceAll("_", " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^\p{Ll}/u, (letter) => letter.toLocaleUpperCase());
+}
+
 export function recordName(record, fallback = "Unnamed record") {
-  return value(record?.provider?.name || record?.name || record?.legal_name, fallback);
+  return textValue(record?.provider?.name || record?.name || record?.legal_name, fallback);
 }
 
 export function providerData(record) {
@@ -36,15 +46,15 @@ export function fieldLabel(path) {
 }
 
 export function issueLabel(issue) {
-  if (issue?.title) return issue.title;
-  if (issue?.type === "missing_data") return `Missing ${fieldLabel(issue.field_path || issue.affected_fields?.[0])}`;
-  if (issue?.type === "expired") return `${value(issue.credential_label, "Credential")} is expired`;
-  if (issue?.type === "expiring") return `${value(issue.credential_label, "Credential")} is expiring soon`;
+  if (issue?.title) return textValue(issue.title);
+  if (issue?.type === "missing_data") return textValue(issue.display_label, `Missing ${fieldLabel(issue.field_path || issue.affected_fields?.[0])}`);
+  if (issue?.type === "expired") return `${textValue(issue.credential_label, "Credential")} is expired`;
+  if (issue?.type === "expiring") return `${textValue(issue.credential_label, "Credential")} is expiring soon`;
   return fieldLabel(issue?.field_path || issue?.affected_fields?.[0] || issue?.type);
 }
 
 export function issueTypeLabel(type) {
-  return String(type || "issue").replaceAll("_", " ");
+  return textValue(type || "issue");
 }
 
 export function categoryLabel(category) {
@@ -106,7 +116,7 @@ export function addressLabel(address) {
 }
 
 export function locationLabel(location) {
-  return value(location?.display_name || location?.name || location?.address?.display_name || location?.address?.line_1, "Location not captured");
+  return textValue(location?.display_name || location?.name || location?.address?.display_name || location?.address?.line_1, "Location not captured");
 }
 
 export function priority(issue) {

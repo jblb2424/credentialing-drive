@@ -33,7 +33,7 @@ REQUIRED_PROVIDER_FIELDS = (
 # required for credentialing operations. DBA and languages remain optional.
 REQUIRED_GROUP_FIELDS = ("legal_name", "type_2_npi", "tax_id")
 REQUIRED_GROUP_LOCATION_FIELDS = (
-    "display_name", "type", "address", "phone", "email", "practice_hours", "faxes",
+    "display_name", "address", "phone", "email", "practice_hours", "faxes",
 )
 
 REQUIRED_COLLECTION_FIELDS = {
@@ -506,10 +506,10 @@ def missing_field_display_label(field_path, provider):
     """Create an operator-facing label while retaining the precise API field path."""
     if field_path.startswith("provider."):
         field_name = field_path.removeprefix("provider.")
-        return field_label(field_name)
+        return f"Missing {field_label(field_name)}"
 
     if "[" not in field_path:
-        return COLLECTION_LABELS.get(field_path, field_label(field_path))
+        return f"Missing {COLLECTION_LABELS.get(field_path, field_label(field_path))}"
 
     collection_name, indexed_field = field_path.split("[", maxsplit=1)
     index_text, field_name = indexed_field.split("].", maxsplit=1)
@@ -519,7 +519,7 @@ def missing_field_display_label(field_path, provider):
     except (IndexError, ValueError):
         record = None
     record_label = missing_record_label(collection_name, record)
-    return f"{field_label(field_name)} for {record_label}"
+    return f"{record_label} missing {field_label(field_name)}"
 
 
 def missing_record_label(collection_name, record):
@@ -546,9 +546,9 @@ def field_label(field_name):
 
 def group_missing_field_display_label(field_path, group):
     if field_path.startswith("group."):
-        return field_label(field_path.removeprefix("group."))
+        return f"Missing {field_label(field_path.removeprefix('group.'))}"
     if field_path == "locations":
-        return GROUP_COLLECTION_LABELS["locations"]
+        return f"Missing {GROUP_COLLECTION_LABELS['locations']}"
 
     collection_name, indexed_field = field_path.split("[", maxsplit=1)
     index_text, field_name = indexed_field.split("].", maxsplit=1)
@@ -558,7 +558,7 @@ def group_missing_field_display_label(field_path, group):
     except (IndexError, ValueError):
         location = None
     location_name = group_location_label(location)
-    return f"{field_label(field_name)} for {location_name or 'this practice location'}"
+    return f"{location_name or 'Practice location'} missing {field_label(field_name)}"
 
 
 def group_location_label(location):

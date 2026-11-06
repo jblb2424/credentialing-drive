@@ -66,7 +66,7 @@ function issueLabel(issue) {
   const credential = issue.credential_label || field || "Credential";
   if (issue.type === "expiring") return `${credential} expires in ${issue.days_until_expiration} days`;
   if (issue.type === "expired") return `${credential} is expired`;
-  if (issue.type === "missing_data") return `Missing ${field || "critical record data"}`;
+  if (issue.type === "missing_data") return issue.display_label || `Missing ${field || "critical record data"}`;
   if (issue.type === "discrepancy") return `Conflicting ${field || "record information"}`;
   return issue.type?.replaceAll("_", " ") || "Record needs review";
 }

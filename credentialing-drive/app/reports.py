@@ -119,7 +119,7 @@ def location_name(location):
 def issue_details(issue):
     field = issue.get("display_label") or ", ".join(issue.get("affected_fields") or [])
     if issue.get("type") == "missing_data":
-        return f"Missing {field or 'required information'}"
+        return field or "Missing required information"
     if issue.get("type") == "discrepancy":
         return f"Conflicting {field or 'provider information'}"
     return value_text(issue.get("credential_label") or field)

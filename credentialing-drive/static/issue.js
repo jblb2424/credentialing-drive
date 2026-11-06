@@ -38,7 +38,7 @@ function humanize(value) {
 }
 
 function issueTitle(issue) {
-  if (issue.type === "missing_data" && issue.display_label) return `Missing: ${issue.display_label}`;
+  if (issue.type === "missing_data" && issue.display_label) return issue.display_label;
   return issue.credential_label
     ? `${humanize(issue.type)}: ${issue.credential_label}`
     : humanize(issue.type) || "Credentialing issue";
@@ -54,7 +54,9 @@ function issueDescription(issue) {
   const credential = issue.credential_label || field || "A credential";
   if (issue.type === "expired") return `${credential} requires immediate attention because it is past its expiration date.`;
   if (issue.type === "expiring") return `${credential} is approaching expiration and should be renewed or verified.`;
-  if (issue.type === "missing_data") return `This ${recordLabel} record is missing ${field || "critical information"} needed for credentialing.`;
+  if (issue.type === "missing_data") return issue.display_label
+    ? `${issue.display_label} requires attention because it has not been captured.`
+    : `This ${recordLabel} record is missing ${field || "critical information"} needed for credentialing.`;
   if (issue.type === "discrepancy") return `Two source documents report conflicting information for ${field || `this ${recordLabel} record`}.`;
   return `This ${recordLabel} record needs review.`;
 }

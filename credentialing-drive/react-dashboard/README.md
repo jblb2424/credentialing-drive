@@ -4,9 +4,16 @@ This is a React/Vite migration of the existing Cozema Health dashboard. It keeps
 
 ## Run locally
 
-1. Start the FastAPI API from the repository root on `127.0.0.1:8080`.
-2. In this directory, run `npm install` once.
-3. Run `npm run dev` and open `http://127.0.0.1:5173/?entity=dummy-client`.
+From the repository root, run the coordinated local dashboard session:
+
+```bash
+./scripts/run-local-dashboard.sh
+```
+
+It starts FastAPI with the local development auth bypass on `127.0.0.1:8080`
+and Vite on `127.0.0.1:5173`. Stop the command to shut down both services.
+Run `npm install` in this directory once before using it, then open
+`http://127.0.0.1:5173/?entity=dummy-client`.
 
 Vite proxies `/entities` and `/auth` to the FastAPI service, so the React app uses the same data and authentication behavior as the existing dashboard.
 

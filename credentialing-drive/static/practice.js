@@ -64,7 +64,7 @@ function renderLocations(locations) {
       : typeof location.name === "string" ? location.name : "Practice location";
     const details = [formatAddress(location.address || embeddedAddress), textList(location.phone), textList(location.email)].filter(Boolean).join(" · ");
     const supporting = [location.practice_hours && `Hours: ${textList(location.practice_hours)}`, location.faxes && `Fax: ${textList(location.faxes)}`, location.languages && `Languages: ${textList(location.languages)}`].filter(Boolean).join(" · ");
-    return `<article class="location-card"><span class="location-type">${escapeHtml(value(location.type, "Location type"))}</span><h3>${escapeHtml(value(title, "Location name"))}</h3><p>${escapeHtml(value(details, "Location contact details"))}</p>${supporting ? `<span class="practice-note">${escapeHtml(supporting)}</span>` : ""}</article>`;
+    return `<article class="location-card"><h3>${escapeHtml(value(title, "Location name"))}</h3><p>${escapeHtml(value(details, "Location contact details"))}</p>${supporting ? `<span class="practice-note">${escapeHtml(supporting)}</span>` : ""}</article>`;
   }).join("");
 }
 
@@ -91,7 +91,7 @@ function humanizeField(value) {
 
 function issueLabel(issue) {
   const field = issue.display_label || humanizeField((issue.affected_fields || []).join(", "));
-  if (issue.type === "missing_data") return `Missing ${field}`;
+  if (issue.type === "missing_data") return issue.display_label || `Missing ${field}`;
   if (issue.type === "discrepancy") return `Conflicting ${field}`;
   return issue.type?.replaceAll("_", " ") || "Needs review";
 }

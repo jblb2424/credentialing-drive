@@ -97,7 +97,7 @@ function issueLabel(issue) {
   const credential = issue.credential_label || field || "Credential";
   if (issue.type === "expiring") return `${credential} expires in ${issue.days_until_expiration} days`;
   if (issue.type === "expired") return `${credential} is expired`;
-  if (issue.type === "missing_data") return `Missing ${field || "critical provider data"}`;
+  if (issue.type === "missing_data") return issue.display_label || `Missing ${field || "critical provider data"}`;
   if (issue.type === "discrepancy") return `Conflicting ${field || "provider information"}`;
   return humanize(issue.type) || "Record needs review";
 }
@@ -150,7 +150,7 @@ function renderLocations(provider) {
     const locationData = typeof location === "object" ? location : { display_name: location };
     const title = firstAvailable(locationData, ["display_name", "name", "location_name"]);
     const details = formatAddress(locationData.address) || firstAvailable(locationData, ["phone", "email"]);
-    return `<article class="location-card"><span class="location-type">${escapeHtml(value(locationData.type, "Location type"))}</span><h3>${escapeHtml(value(title, "Location name"))}</h3><p>${escapeHtml(value(details, "Location contact details"))}</p>${locationData.practice_name ? `<span class="practice-note">${escapeHtml(locationData.practice_name)}</span>` : ""}</article>`;
+    return `<article class="location-card"><h3>${escapeHtml(value(title, "Location name"))}</h3><p>${escapeHtml(value(details, "Location contact details"))}</p>${locationData.practice_name ? `<span class="practice-note">${escapeHtml(locationData.practice_name)}</span>` : ""}</article>`;
   }).join("");
 }
 

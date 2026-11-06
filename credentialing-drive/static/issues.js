@@ -55,7 +55,7 @@ function issueLabel(issue) {
   const field = issue.display_label || humanizeField((issue.affected_fields || []).join(", "));
   if (issue.type === "expired") return `${issue.credential_label || field} is expired`;
   if (issue.type === "expiring") return `${issue.credential_label || field} expires soon`;
-  if (issue.type === "missing_data") return `Missing ${field}`;
+  if (issue.type === "missing_data") return issue.display_label || `Missing ${field}`;
   if (issue.type === "discrepancy") return `Conflicting ${field}`;
   return issue.type?.replaceAll("_", " ") || "Needs review";
 }

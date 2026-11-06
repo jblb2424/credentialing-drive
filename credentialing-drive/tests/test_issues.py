@@ -57,6 +57,12 @@ class ProviderIssueTests(unittest.TestCase):
                             ]
                         },
                     },
+                    "previous_files": {
+                        "provider.npi": {
+                            "file_name": "earlier-profile.pdf",
+                            "drive_file_id": "earlier-file-id",
+                        },
+                    },
                 },
             ),
             FakeSnapshot(
@@ -86,6 +92,10 @@ class ProviderIssueTests(unittest.TestCase):
         self.assertTrue({"discrepancy", "expiring"}.issubset({issue["type"] for issue in issues}))
         discrepancy = next(issue for issue in issues if issue["type"] == "discrepancy")
         self.assertEqual(discrepancy["severity"], "high")
+        self.assertEqual(discrepancy["previous_value"], "111")
+        self.assertEqual(discrepancy["current_value"], "222")
+        self.assertEqual(discrepancy["previous_file_name"], "earlier-profile.pdf")
+        self.assertEqual(discrepancy["file_name"], "license.pdf")
         expiration = next(issue for issue in issues if issue["type"] == "expiring")
         self.assertEqual(expiration["file_name"], "license.pdf")
 
@@ -223,7 +233,7 @@ class ProviderIssueTests(unittest.TestCase):
             for issue in issues
             if issue["type"] == "missing_data"
         }
-        self.assertEqual(issue_by_field["licenses[0].state"]["display_label"], "state for State medical license")
+        self.assertEqual(issue_by_field["licenses[0].state"]["display_label"], "State medical license missing state")
 
     def test_missing_data_has_no_source_provenance(self):
         provider_ref = FakeProviderReference([
@@ -288,7 +298,6 @@ class GroupIssueTests(unittest.TestCase):
             "tax_id": "22-2222222",
             "locations": [{
                 "display_name": "Main Office",
-                "type": "primary",
                 "address": "1 Main Street",
             }],
         }
@@ -305,8 +314,18 @@ class GroupIssueTests(unittest.TestCase):
             for issue in issues
             if issue["type"] == "missing_data"
         }
+        issues_by_field = {
+            issue["affected_fields"][0]: issue
+            for issue in issues
+            if issue["type"] == "missing_data"
+        }
         self.assertIn("locations[0].phone", missing_fields)
         self.assertIn("locations[0].email", missing_fields)
+        self.assertNotIn("locations[0].type", missing_fields)
+        self.assertEqual(
+            issues_by_field["locations[0].email"]["display_label"],
+            "Main Office missing email",
+        )
 
     def test_group_type_2_npi_is_critical_but_other_missing_group_data_is_medium(self):
         issues = calculate_group_issues(
@@ -332,7 +351,7 @@ class GroupIssueTests(unittest.TestCase):
             }}]},
         )
 
-        self.assertEqual(label, "phone for 100 Stewart Avenue, Garden City, NY")
+        self.assertEqual(label, "100 Stewart Avenue, Garden City, NY missing phone")
 
 
 if __name__ == "__main__":
