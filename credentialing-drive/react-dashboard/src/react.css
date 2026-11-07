@@ -6,9 +6,7 @@
 
 .attention-row .attention-provider,
 .attention-row .attention-detail {
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
+  text-decoration: none;
 }
 
 .attention-row .attention-provider:hover,
@@ -1585,6 +1583,10 @@
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
   display: inline-block;
+}
+
+.aside-link span {
+  margin-left: 5px;
 }
 
 .record-issues {

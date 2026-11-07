@@ -1033,7 +1033,7 @@ function RecordError({ error }) { return <main className="record-state-page"><se
 function RecordShell({ type, record, title, entityId, recordId, issues, locations = [], actions, children }) {
   const navigate = useNavigate();
   const activityPath = href(`/activity/view?record_id=${encodeURIComponent(recordId)}&record_type=${type}`, entityId);
-  return <div className="record-page"><header className="record-topbar"><Link className="brand" to={href("/", entityId)}><span className="brand-mark">C</span><span><BrandWordmark /></span></Link></header><main className="record-content"><section className="record-hero"><div className="record-hero-heading"><div><p className="eyebrow">{type === "practice" ? "Practice / group" : "Provider record"}</p><h1>{title}</h1><p className="lede">{type === "practice" ? "Organization credentialing profile" : "Provider credentialing profile"}</p></div>{actions}</div><nav className="record-tabs"><a href="#profile">{type === "practice" ? "Practice profile" : "Provider profile"}</a><a href="#issues">Open issues</a><a href={activityPath}>Revision history</a></nav></section><div className="record-layout"><div className="record-sections" id="profile">{children}</div><aside className="record-aside"><section className="aside-card"><p className="eyebrow">At a glance</p><Info label="Open issues" value={issues.length} /><Info label="Locations" value={locations.length} /><Link className="aside-link" to={activityPath}>View revision history</Link></section><section className="aside-card" id="issues"><p className="eyebrow">Record integrity</p><h2>Open issues</h2><div className="record-issues">{issues.length ? issues.map((issue, index) => <button type="button" key={`${issue.id || issueLabel(issue)}-${index}`} className={issueRowClassName("record-issue", issue)} onClick={() => navigate(href(`/${type === "practice" ? "practices" : "providers"}/${encodeURIComponent(recordId)}/issues/${encodeURIComponent(issue.id)}/view`, entityId))}><strong>{issueLabel(issue)}</strong><span className="issue-tags"><IssueStatusTags issue={issue} /></span><b>View issue</b></button>) : <div className="empty-inline">No open issues.</div>}</div></section></aside></div></main></div>;
+  return <div className="record-page"><header className="record-topbar"><Link className="brand" to={href("/", entityId)}><span className="brand-mark">C</span><span><BrandWordmark /></span></Link></header><main className="record-content"><section className="record-hero"><div className="record-hero-heading"><div><p className="eyebrow">{type === "practice" ? "Practice / group" : "Provider record"}</p><h1>{title}</h1><p className="lede">{type === "practice" ? "Organization credentialing profile" : "Provider credentialing profile"}</p></div>{actions}</div><nav className="record-tabs"><a href="#profile">{type === "practice" ? "Practice profile" : "Provider profile"}</a><a href="#issues">Open issues</a><a href={activityPath}>Revision history</a></nav></section><div className="record-layout"><div className="record-sections" id="profile">{children}</div><aside className="record-aside"><section className="aside-card"><p className="eyebrow">At a glance</p><Info label="Open issues" value={issues.length} /><Info label="Locations" value={locations.length} /><Link className="aside-link" to={activityPath}>View revision history <span aria-hidden="true">→</span></Link></section><section className="aside-card" id="issues"><p className="eyebrow">Record integrity</p><h2>Open issues</h2><div className="record-issues">{issues.length ? issues.map((issue, index) => <button type="button" key={`${issue.id || issueLabel(issue)}-${index}`} className={issueRowClassName("record-issue", issue)} onClick={() => navigate(href(`/${type === "practice" ? "practices" : "providers"}/${encodeURIComponent(recordId)}/issues/${encodeURIComponent(issue.id)}/view`, entityId))}><strong>{issueLabel(issue)}</strong><span className="issue-tags"><IssueStatusTags issue={issue} /></span><b>View issue</b></button>) : <div className="empty-inline">No open issues.</div>}</div></section></aside></div></main></div>;
 }
 
 const SECTION_EDIT_CONFIG = {
@@ -1310,11 +1310,9 @@ function DiscrepancyValue({ label, value: capturedValue, fileName, variant }) {
 
 function DiscrepancyDetails({ issue }) {
   if (issue?.type !== "discrepancy") return null;
-  const field = fieldLabel(issue.field_path || issue.affected_fields?.[0]);
   return <section className="discrepancy-panel" aria-labelledby="discrepancy-title">
     <p className="eyebrow">Source comparison</p>
     <h2 id="discrepancy-title">Conflicting values</h2>
-    <p>Two source documents report different values for {field}.</p>
     <div className="discrepancy-values">
       <DiscrepancyValue label="Previously recorded" value={issue.previous_value} fileName={issue.previous_file_name} variant="previous" />
       <DiscrepancyValue label="Newly captured" value={issue.current_value} fileName={issue.file_name} variant="current" />
@@ -1337,6 +1335,7 @@ function IssueDetail({ type }) {
   if (request.loading) return <RecordLoading />;
   if (request.error) return <RecordError error={request.error} />;
   const title = issueDetailLabel(issue);
+  const description = issue.description || (issue.type === "missing_data" ? `${textValue(issue.display_label, fieldLabel(issue.field_path || issue.affected_fields?.[0]))} requires attention because it has not been captured.` : ["expired", "expiring"].includes(issue.type) ? title : null);
   const recordTitle = type === "practice" ? value(record.legal_name || record.name, "Practice") : recordName(record, "Provider");
   const dismissableIssue = { ...issue, record_type: type, recordId };
   const canManageIssues = EDITABLE_RECORD_ROLES.has(workspace?.user?.role);
@@ -1365,7 +1364,7 @@ function IssueDetail({ type }) {
           <span className={`severity-tag severity-${issue.severity}`}>{capitalizeLabel(value(issue.severity, "high"))}</span>
           <span className={`issue-type-tag issue-type-${issue.type}`}>{capitalizeLabel(issueTypeLabel(issue.type))}</span>
         </div>
-        <p className="lede">{issue.description || (issue.type === "missing_data" ? `${textValue(issue.display_label, fieldLabel(issue.field_path || issue.affected_fields?.[0]))} requires attention because it has not been captured.` : title)}</p>
+        {description && <p className="lede">{description}</p>}
       </section>
       <DiscrepancyDetails issue={issue} />
       <section className="issue-summary">

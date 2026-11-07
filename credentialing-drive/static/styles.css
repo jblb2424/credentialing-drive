@@ -109,9 +109,9 @@ h2 { font: 700 23px/1.2 var(--font-display); }
 .attention-provider { color: var(--ink); font-size: 13px; font-weight: 800; }
 .attention-provider span { display: block; margin-top: 3px; color: #829ab1; font: 500 10px/1.25 "DM Mono", monospace; }
 .attention-detail { color: var(--ink-soft); font-size: 12px; }
-.severity-tag { display: inline-block; padding: 5px 8px; border-radius: 99px; text-transform: capitalize; font: 500 10px/1 "DM Mono", monospace; }
+.severity-tag { display: inline-block; padding: 5px 8px; border-radius: 99px; box-shadow: 0 2px 5px rgba(16,42,67,.12); text-transform: capitalize; font: 500 10px/1 "DM Mono", monospace; }
 .issue-tags { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.issue-type-tag { display: inline-block; padding: 5px 8px; border-radius: 99px; color: var(--ink-soft); background: #edf3f6; text-transform: capitalize; font: 500 10px/1 "DM Mono", monospace; }
+.issue-type-tag { display: inline-block; padding: 5px 8px; border-radius: 99px; color: var(--ink-soft); background: #edf3f6; box-shadow: 0 2px 5px rgba(16,42,67,.12); text-transform: capitalize; font: 500 10px/1 "DM Mono", monospace; }
 .issue-type-expired, .issue-type-missing_data { color: #ad331c; background: var(--coral-soft); }
 .issue-type-expiring { color: #956408; background: var(--gold-soft); }
 .issue-type-discrepancy { color: var(--pine); background: var(--mint); }
@@ -155,8 +155,8 @@ h2 { font: 700 23px/1.2 var(--font-display); }
 .issue-row-summary strong { color: var(--ink); font-size: 13px; }
 .issue-scope { color: #829ab1; font: 500 10px/1.3 "DM Mono", monospace; }
 .issue-row-context { display: flex; align-items: center; justify-content: flex-end; color: var(--ink-soft); font-size: 11px; }
-.issue-provider-record-link { display: block; padding: 13px 22px; border-top: 1px solid #edf2f7; color: var(--pine); background: #fbfcfd; font-size: 10px; font-weight: 800; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
-.issue-provider-record-link:hover { background: #f0faf6; text-decoration: underline; }
+.issue-provider-record-link { display: block; padding: 13px 22px; border-top: 1px solid #edf2f7; color: var(--pine); background: #fbfcfd; font-size: 10px; font-weight: 800; text-decoration: none; }
+.issue-provider-record-link:hover { background: #f0faf6; }
 .issue-load-more { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 20px; color: #829ab1; font: 500 10px/1.4 "DM Mono", monospace; }
 .severity-critical, .severity-high { color: #ad331c; background: var(--coral-soft); }
 .severity-medium { color: #956408; background: var(--gold-soft); }
@@ -292,7 +292,7 @@ h2 { font: 700 23px/1.2 var(--font-display); }
 .record-loading[hidden], .record-error[hidden], #record-page[hidden] { display: none !important; }
 .record-error { color: #ad331c; }
 .breadcrumbs { display: flex; gap: 9px; color: #829ab1; font: 500 10px/1.2 "DM Mono", monospace; }
-.breadcrumbs a { color: var(--pine); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.breadcrumbs a { color: var(--pine); text-decoration: none; }
 .breadcrumbs strong { color: var(--ink-soft); font-weight: 500; }
 .record-hero { display: flex; align-items: end; justify-content: space-between; gap: 25px; padding: 37px 0 28px; }
 .record-hero h1 { font-size: 43px; }
