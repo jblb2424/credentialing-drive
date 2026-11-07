@@ -239,7 +239,7 @@ function renderIssues(provider) {
     elements.issues.innerHTML = '<p class="aside-empty">No outstanding issues on this record.</p>';
     return;
   }
-  elements.issues.innerHTML = issues.map((issue) => `<a class="record-issue ${issue.type === "expired" ? "is-expired" : ""}" href="/providers/${encodeURIComponent(provider.id)}/issues/${encodeURIComponent(issue.id)}/view?entity=${entityId}"><p>${escapeHtml(issueLabel(issue))}</p><span class="issue-tags"><span class="severity-tag severity-${escapeHtml(issue.severity || "low")}">${escapeHtml(issue.severity || "review")}</span><span class="issue-type-tag issue-type-${escapeHtml(issue.type || "review")}">${escapeHtml(issueTypeLabel(issue))}</span></span><span class="issue-link">View issue →</span></a>`).join("");
+  elements.issues.innerHTML = issues.map((issue) => `<a class="record-issue ${issue.type === "expired" ? "is-expired" : ""}" href="/providers/${encodeURIComponent(provider.id)}/issues/${encodeURIComponent(issue.id)}/view?entity=${entityId}"><p>${escapeHtml(issueLabel(issue))}</p><span class="issue-tags"><span class="severity-tag severity-${escapeHtml(issue.severity || "low")}">${escapeHtml(issue.severity || "review")}</span><span class="issue-type-tag issue-type-${escapeHtml(issue.type || "review")}">${escapeHtml(issueTypeLabel(issue))}</span></span></a>`).join("");
 }
 
 function renderSummary(provider) {

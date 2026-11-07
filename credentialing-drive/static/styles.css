@@ -110,7 +110,8 @@ h2 { font: 700 23px/1.2 var(--font-display); }
 .attention-provider span { display: block; margin-top: 3px; color: #829ab1; font: 500 10px/1.25 "DM Mono", monospace; }
 .attention-detail { color: var(--ink-soft); font-size: 12px; }
 .severity-tag { display: inline-block; padding: 5px 8px; border-radius: 99px; box-shadow: 0 2px 5px rgba(16,42,67,.12); text-transform: capitalize; font: 500 10px/1 "DM Mono", monospace; }
-.issue-tags { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.issue-tags { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.issue-tags .issue-dismiss-button { margin-left: 8px; }
 .issue-type-tag { display: inline-block; padding: 5px 8px; border-radius: 99px; color: var(--ink-soft); background: #edf3f6; box-shadow: 0 2px 5px rgba(16,42,67,.12); text-transform: capitalize; font: 500 10px/1 "DM Mono", monospace; }
 .issue-type-expired, .issue-type-missing_data { color: #ad331c; background: var(--coral-soft); }
 .issue-type-expiring { color: #956408; background: var(--gold-soft); }
@@ -373,7 +374,6 @@ h2 { font: 700 23px/1.2 var(--font-display); }
 .record-issue.issue-row--expired { border-left: 3px solid var(--coral); background: #fff; }
 .record-issue.issue-row--expired:hover { background: var(--expired-row-hover); }
 .record-issue p { margin: 0 0 8px; color: var(--ink-soft); font-size: 11px; line-height: 1.55; }
-.issue-link { display: block; margin-top: 9px; color: var(--pine); font-size: 10px; font-weight: 800; }
 .aside-empty { margin: 15px 0 0; color: var(--ink-soft); font-size: 11px; line-height: 1.6; }
 .summary-list { display: grid; gap: 13px; margin-top: 18px; }
 .summary-list div { padding-bottom: 12px; border-bottom: 1px solid #edf2f7; }

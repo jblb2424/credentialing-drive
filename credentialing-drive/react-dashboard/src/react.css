@@ -16,8 +16,8 @@
 
 .issue-dismiss-button {
   display: inline-grid;
-  width: 18px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
   flex: 0 0 auto;
   place-items: center;
   border: 0;
@@ -47,9 +47,9 @@
 
 .expiration-action-heading,
 .expiration-action {
-  width: 34px;
-  padding-left: 0 !important;
-  text-align: right;
+  width: 48px;
+  padding-left: 12px !important;
+  text-align: center;
 }
 
 .expiration-action .issue-dismiss-button {
@@ -1614,13 +1614,6 @@
   margin: 0 0 8px;
   font-size: 11px;
   line-height: 1.55;
-  display: block;
-}
-
-.record-page .record-issue b {
-  color: var(--pine);
-  margin-top: 9px;
-  font-size: 10px;
   display: block;
 }
 

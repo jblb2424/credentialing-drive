@@ -104,7 +104,7 @@ function renderIssues(group) {
   }
   elements.issues.innerHTML = issues.slice(0, 5).map((issue) => {
     const issueUrl = `/practices/${encodeURIComponent(group.id)}/issues/${encodeURIComponent(issue.id)}/view?entity=${encodeURIComponent(entityId)}`;
-    return `<a class="record-issue" href="${issueUrl}"><p>${escapeHtml(issueLabel(issue))}</p><span class="severity-tag severity-${escapeHtml(issue.severity || "low")}">${escapeHtml(issue.severity || "review")}</span><span class="issue-type-tag issue-type-${escapeHtml(issue.type || "review")}">${escapeHtml(String(issue.type || "review").replaceAll("_", " "))}</span><span class="issue-link">View issue →</span></a>`;
+    return `<a class="record-issue" href="${issueUrl}"><p>${escapeHtml(issueLabel(issue))}</p><span class="severity-tag severity-${escapeHtml(issue.severity || "low")}">${escapeHtml(issue.severity || "review")}</span><span class="issue-type-tag issue-type-${escapeHtml(issue.type || "review")}">${escapeHtml(String(issue.type || "review").replaceAll("_", " "))}</span></a>`;
   }).join("");
 }
 
