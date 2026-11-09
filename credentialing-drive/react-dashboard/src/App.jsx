@@ -11,6 +11,7 @@ import { DEFAULT_ENTITY_ID, addressLabel, categoryLabel, dateLabel, expirationSt
 const navItems = [
   ["overview", "▦", "Overview", "/"],
   ["providers", "◉", "Providers", "/providers/view"],
+  ["practices", "▤", "Practices", "/practices/view"],
   ["expirations", "◷", "Expirations", "/expirations/view"],
   ["activity", "◌", "Activity", "/activity/view"],
   ["reports", "▤", "Reports", "/reports/view"],
@@ -338,7 +339,7 @@ function Directory({ type }) {
   });
   const title = type === "provider" ? "Providers" : "Practices";
   document.title = `${title} | Cozema Health`;
-  return <Shell active="providers"><section className="workspace-hero"><p className="eyebrow">{type === "provider" ? "Provider directory" : "Practice network"}</p><h1>{title}</h1><p className="lede">{type === "provider" ? "Every credentialing provider record for this client." : "Every practice and organization credentialing record for this client."}</p></section>
+  return <Shell active={type === "provider" ? "providers" : "practices"}><section className="workspace-hero"><p className="eyebrow">{type === "provider" ? "Provider directory" : "Practice network"}</p><h1>{title}</h1><p className="lede">{type === "provider" ? "Every credentialing provider record for this client." : "Every practice and organization credentialing record for this client."}</p></section>
     <section className="directory-section"><div className="section-heading"><div><p className="eyebrow">{request.loading ? "Loading records" : `${filtered.length} records`}</p><h2>{type === "provider" ? "Provider records" : "Practice records"}</h2></div><div className="directory-actions"><label className="search-field">⌕<input value={query} onChange={(event) => setQuery(event.target.value)} type="search" placeholder={`Search ${type === "provider" ? "providers" : "practices"}`} /></label></div></div>
       <div className="provider-table-wrap"><table className="provider-table"><thead>{type === "provider" ? <tr><th>Provider</th><th>NPI</th><th>Type</th><th>Practices</th><th>Record health</th></tr> : <tr><th>Practice</th><th>Type 2 NPI</th><th>Tax ID</th><th>DBA</th><th>Record health</th></tr>}</thead><tbody>{request.loading ? <EmptyRow columns="5"><InlineLoading text={`Loading ${title.toLowerCase()}...`} /></EmptyRow> : request.error ? <EmptyRow columns="5">{request.error.message}</EmptyRow> : filtered.length ? filtered.map((record) => <DirectoryRow key={record.id} record={record} type={type} entityId={entityId} />) : <EmptyRow columns="5">No records match the current search.</EmptyRow>}</tbody></table></div>
     </section></Shell>;

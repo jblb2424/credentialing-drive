@@ -9,29 +9,37 @@ if ! command -v cloudflared >/dev/null 2>&1; then
 fi
 
 tunnel_log="$(mktemp)"
+worker_tunnel_log="$(mktemp)"
 tunnel_pid=""
+worker_tunnel_pid=""
 api_pid=""
 
 cleanup() {
   [[ -n "$api_pid" ]] && kill "$api_pid" 2>/dev/null || true
+  [[ -n "$worker_tunnel_pid" ]] && kill "$worker_tunnel_pid" 2>/dev/null || true
   [[ -n "$tunnel_pid" ]] && kill "$tunnel_pid" 2>/dev/null || true
-  rm -f "$tunnel_log"
+  rm -f "$tunnel_log" "$worker_tunnel_log"
 }
 trap cleanup EXIT INT TERM
 
 cloudflared tunnel --url http://127.0.0.1:8080 >"$tunnel_log" 2>&1 &
 tunnel_pid=$!
+cloudflared tunnel --url http://127.0.0.1:8081 >"$worker_tunnel_log" 2>&1 &
+worker_tunnel_pid=$!
 
 tunnel_url=""
+worker_tunnel_url=""
 for _ in $(seq 1 30); do
   tunnel_url="$(grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' "$tunnel_log" | head -n 1 || true)"
-  [[ -n "$tunnel_url" ]] && break
+  worker_tunnel_url="$(grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' "$worker_tunnel_log" | head -n 1 || true)"
+  [[ -n "$tunnel_url" && -n "$worker_tunnel_url" ]] && break
   sleep 1
 done
 
-if [[ -z "$tunnel_url" ]]; then
+if [[ -z "$tunnel_url" || -z "$worker_tunnel_url" ]]; then
   cat "$tunnel_log" >&2
-  echo "Cloudflare Quick Tunnel did not start." >&2
+  cat "$worker_tunnel_log" >&2
+  echo "Cloudflare Quick Tunnels did not start." >&2
   exit 1
 fi
 
@@ -41,13 +49,13 @@ export GCP_PROJECT_ID="${LOCAL_GCP_PROJECT:-healthcare-credentialing}"
 export CLOUD_TASKS_LOCATION="${CLOUD_TASKS_LOCATION:-us-east1}"
 export CLOUD_TASKS_QUEUE="${CLOUD_TASKS_QUEUE:-drive-document-processing}"
 export TASK_INVOKER_SERVICE_ACCOUNT="${TASK_INVOKER_SERVICE_ACCOUNT:-credentialing-drive-tasks@${GCP_PROJECT_ID}.iam.gserviceaccount.com}"
-export TASK_PROCESSOR_URL="$tunnel_url/tasks/process-drive-file"
+export TASK_PROCESSOR_URL="$worker_tunnel_url/tasks/process-drive-file"
 # Local intake uses the same development Document AI processor as the queued
 # Cloud Tasks worker. Allow an override for an isolated processor when needed.
 export DOCUMENT_AI_LOCATION="${DOCUMENT_AI_LOCATION:-us}"
 export DOCUMENT_AI_PROCESSOR_ID="${LOCAL_DOCUMENT_AI_PROCESSOR_ID:-302b5ee22c4f448f}"
 echo "Local Drive webhook: $GOOGLE_DRIVE_WEBHOOK_URL"
-echo "Local task processor: $TASK_PROCESSOR_URL"
+echo "Local document worker: $TASK_PROCESSOR_URL"
 echo "Keep this process running while testing local-only Drive monitoring."
 
 ./scripts/run-local-api.sh &

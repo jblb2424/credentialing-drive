@@ -18,7 +18,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY main.py .
+COPY main.py worker.py ./
 COPY app ./app
 COPY static ./static
 COPY --from=frontend-build /build/react-dashboard/dist ./react-dashboard/dist

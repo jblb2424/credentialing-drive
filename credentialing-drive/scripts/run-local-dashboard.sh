@@ -1,24 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run the local API and Vite dashboard as one development session. The bypass is
-# deliberately local-only so the dashboard can use the development workspace.
+# Run the full local environment as one session: Vite, the dashboard API, the
+# isolated document worker, and the temporary HTTPS endpoints Drive needs.
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-api_pid=""
+intake_pid=""
 dashboard_pid=""
 
 cleanup() {
   [[ -n "$dashboard_pid" ]] && kill "$dashboard_pid" 2>/dev/null || true
-  [[ -n "$api_pid" ]] && kill "$api_pid" 2>/dev/null || true
+  [[ -n "$intake_pid" ]] && kill "$intake_pid" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
 (
   cd "$root_dir"
+  # This child starts the dashboard API on 8080, the document worker on 8081,
+  # and separate public tunnel URLs for Drive webhooks and Cloud Tasks.
   LOCAL_DEV_AUTH_BYPASS="${LOCAL_DEV_AUTH_BYPASS:-true}" \
-    .venv/bin/uvicorn main:app --host 127.0.0.1 --port 8080
+    ./scripts/run-local-drive-api.sh
 ) &
-api_pid=$!
+intake_pid=$!
 
 (
   cd "$root_dir/react-dashboard"
@@ -26,4 +28,9 @@ api_pid=$!
 ) &
 dashboard_pid=$!
 
-wait -n "$api_pid" "$dashboard_pid"
+while kill -0 "$intake_pid" 2>/dev/null && kill -0 "$dashboard_pid" 2>/dev/null; do
+  sleep 1
+done
+
+wait "$intake_pid" 2>/dev/null || true
+wait "$dashboard_pid" 2>/dev/null || true

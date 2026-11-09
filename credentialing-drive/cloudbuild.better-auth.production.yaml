@@ -4,6 +4,7 @@ substitutions:
   _REGION: us-east1
   _REPOSITORY: credentialing
   _SERVICE: credentialing-drive
+  _WORKER_SERVICE: credentialing-drive-worker
   _FIRESTORE_DATABASE: credentialing-drive
   _TASKS_LOCATION: us-east1
   _TASKS_QUEUE: drive-document-processing
@@ -17,6 +18,8 @@ substitutions:
   _DRIVE_WATCH_OWNER: cloud
   _VERTEX_AI_LOCATION: global
   _GEMINI_MODEL: gemini-3.5-flash
+  _DOCUMENT_AI_LOCATION: us
+  _DOCUMENT_AI_PROCESSOR_ID: 82ab43b860883ee5
   _BETTER_AUTH_URL: https://auth.cozemahealth.com
   _BETTER_AUTH_JWT_AUDIENCE: https://app.cozemahealth.com
   _COZEMA_PLATFORM_ADMIN_EMAILS: justin.barry97@gmail.com
@@ -40,6 +43,57 @@ steps:
     args:
       - push
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$BUILD_ID
+  # Keep long-running OCR and model calls off the browser-facing service. The
+  # worker remains private; Cloud Tasks receives the only invoker grant below.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_WORKER_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/${_SERVICE}:$BUILD_ID
+      # The shared image defaults to the dashboard app. Override it so this
+      # service runs the private Cloud Tasks worker entry point instead.
+      - --command=uvicorn
+      - --args=worker:app,--host,0.0.0.0,--port,8080
+      - --region=${_REGION}
+      - --platform=managed
+      - --no-allow-unauthenticated
+      - --service-account=credentialing-drive-runtime@$PROJECT_ID.iam.gserviceaccount.com
+      - --memory=1Gi
+      - --concurrency=4
+      - --max-instances=10
+      - --timeout=1800
+      - --update-env-vars=GCP_PROJECT_ID=$PROJECT_ID,FIRESTORE_DATABASE=${_FIRESTORE_DATABASE},CLOUD_TASKS_LOCATION=${_TASKS_LOCATION},CLOUD_TASKS_QUEUE=${_TASKS_QUEUE},TASK_INVOKER_SERVICE_ACCOUNT=credentialing-drive-tasks@$PROJECT_ID.iam.gserviceaccount.com,DOCUMENT_AI_LOCATION=${_DOCUMENT_AI_LOCATION},DOCUMENT_AI_PROCESSOR_ID=${_DOCUMENT_AI_PROCESSOR_ID},VERTEX_AI_LOCATION=${_VERTEX_AI_LOCATION},GEMINI_MODEL=${_GEMINI_MODEL},GEMINI_RECONCILIATION_MODEL=${_GEMINI_MODEL}
+      - --labels=environment=production,managed-by=cloud-build,component=document-worker
+  # Cloud Run assigns the canonical worker URL during deployment. Configure it
+  # before granting Cloud Tasks access so no request can reach a half-configured
+  # worker revision.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        task_url="$$(gcloud run services describe ${_WORKER_SERVICE} --region=${_REGION} --project=$PROJECT_ID --format='value(status.url)')/tasks/process-drive-file"
+        gcloud run services update ${_WORKER_SERVICE} --region=${_REGION} --project=$PROJECT_ID --update-env-vars=TASK_PROCESSOR_URL=$$task_url
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - services
+      - add-iam-policy-binding
+      - ${_WORKER_SERVICE}
+      - --region=${_REGION}
+      - --member=serviceAccount:credentialing-drive-tasks@$PROJECT_ID.iam.gserviceaccount.com
+      - --role=roles/run.invoker
+  # Switch the dashboard task target only after the private worker is ready.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        task_url="$$(gcloud run services describe ${_WORKER_SERVICE} --region=${_REGION} --project=$PROJECT_ID --format='value(status.url)')/tasks/process-drive-file"
+        gcloud run services update ${_SERVICE} --region=${_REGION} --project=$PROJECT_ID --update-env-vars=TASK_PROCESSOR_URL=$$task_url
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
     args:
@@ -53,7 +107,7 @@ steps:
       - --service-account=credentialing-drive-runtime@$PROJECT_ID.iam.gserviceaccount.com
       - --add-cloudsql-instances=${_CLOUD_SQL_INSTANCE}
       - --update-secrets=GOOGLE_CLIENT_ID=credentialing-drive-prod-google-client-id:${_GOOGLE_CLIENT_ID_VERSION},GOOGLE_CLIENT_SECRET=credentialing-drive-prod-google-client-secret:${_GOOGLE_CLIENT_SECRET_VERSION},BETTER_AUTH_DATABASE_URL=better-auth-database-url:${_BETTER_AUTH_DATABASE_URL_VERSION},AUTH_EVENT_WEBHOOK_SECRET=auth-event-webhook-secret:${_AUTH_EVENT_WEBHOOK_SECRET_VERSION}
-      - --update-env-vars=GCP_PROJECT_ID=$PROJECT_ID,FIRESTORE_DATABASE=${_FIRESTORE_DATABASE},CLOUD_TASKS_LOCATION=${_TASKS_LOCATION},CLOUD_TASKS_QUEUE=${_TASKS_QUEUE},TASK_PROCESSOR_URL=${_INTERNAL_SERVICE_URL}/tasks/process-drive-file,TASK_INVOKER_SERVICE_ACCOUNT=credentialing-drive-tasks@$PROJECT_ID.iam.gserviceaccount.com,DRIVE_WATCH_OWNER=${_DRIVE_WATCH_OWNER},DRIVE_WATCH_RENEWAL_SERVICE_ACCOUNT=credentialing-drive-scheduler@$PROJECT_ID.iam.gserviceaccount.com,DRIVE_WATCH_RENEWAL_AUDIENCE=${_INTERNAL_SERVICE_URL},APP_BASE_URL=${_APP_BASE_URL},GOOGLE_REDIRECT_URI=${_GOOGLE_REDIRECT_URI},GOOGLE_DRIVE_WEBHOOK_URL=${_GOOGLE_DRIVE_WEBHOOK_URL},VERTEX_AI_LOCATION=${_VERTEX_AI_LOCATION},GEMINI_MODEL=${_GEMINI_MODEL},GEMINI_RECONCILIATION_MODEL=${_GEMINI_MODEL},AUTH_PROVIDER=better_auth,BETTER_AUTH_URL=${_BETTER_AUTH_URL},BETTER_AUTH_JWT_AUDIENCE=${_BETTER_AUTH_JWT_AUDIENCE},BETTER_AUTH_GOOGLE_SIGN_IN_ENABLED=true,COZEMA_PLATFORM_ADMIN_EMAILS=${_COZEMA_PLATFORM_ADMIN_EMAILS}
+      - --update-env-vars=GCP_PROJECT_ID=$PROJECT_ID,FIRESTORE_DATABASE=${_FIRESTORE_DATABASE},CLOUD_TASKS_LOCATION=${_TASKS_LOCATION},CLOUD_TASKS_QUEUE=${_TASKS_QUEUE},TASK_INVOKER_SERVICE_ACCOUNT=credentialing-drive-tasks@$PROJECT_ID.iam.gserviceaccount.com,DRIVE_WATCH_OWNER=${_DRIVE_WATCH_OWNER},DRIVE_WATCH_RENEWAL_SERVICE_ACCOUNT=credentialing-drive-scheduler@$PROJECT_ID.iam.gserviceaccount.com,DRIVE_WATCH_RENEWAL_AUDIENCE=${_INTERNAL_SERVICE_URL},APP_BASE_URL=${_APP_BASE_URL},GOOGLE_REDIRECT_URI=${_GOOGLE_REDIRECT_URI},GOOGLE_DRIVE_WEBHOOK_URL=${_GOOGLE_DRIVE_WEBHOOK_URL},DOCUMENT_AI_LOCATION=${_DOCUMENT_AI_LOCATION},DOCUMENT_AI_PROCESSOR_ID=${_DOCUMENT_AI_PROCESSOR_ID},VERTEX_AI_LOCATION=${_VERTEX_AI_LOCATION},GEMINI_MODEL=${_GEMINI_MODEL},GEMINI_RECONCILIATION_MODEL=${_GEMINI_MODEL},AUTH_PROVIDER=better_auth,BETTER_AUTH_URL=${_BETTER_AUTH_URL},BETTER_AUTH_JWT_AUDIENCE=${_BETTER_AUTH_JWT_AUDIENCE},BETTER_AUTH_GOOGLE_SIGN_IN_ENABLED=true,COZEMA_PLATFORM_ADMIN_EMAILS=${_COZEMA_PLATFORM_ADMIN_EMAILS}
       - --labels=environment=production,managed-by=cloud-build,auth-provider=better-auth
 
 images:
