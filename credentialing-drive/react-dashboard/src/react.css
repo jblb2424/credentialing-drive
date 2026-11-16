@@ -1521,6 +1521,12 @@
   font-size: 11px;
 }
 
+.education-timeline .education-dates {
+  display: block;
+  margin-top: 5px;
+  color: #58738f;
+}
+
 .insurance-card .info-row {
   color: #829ab1;
   justify-content: space-between;

@@ -332,7 +332,14 @@ function Directory({ type }) {
   const collection = type === "provider" ? "providers" : "groups";
   const request = useRequest(entityPath(entityId, `/${collection}?limit=500`));
   const records = request.data?.[collection] || [];
-  const filtered = records.filter((record) => {
+  const sortedRecords = [...records].sort((left, right) => {
+    const leftData = type === "provider" ? providerData(left) : left;
+    const rightData = type === "provider" ? providerData(right) : right;
+    const leftName = textValue(leftData.name || leftData.legal_name, "");
+    const rightName = textValue(rightData.name || rightData.legal_name, "");
+    return leftName.localeCompare(rightName, undefined, { sensitivity: "base" });
+  });
+  const filtered = sortedRecords.filter((record) => {
     const data = type === "provider" ? providerData(record) : record;
     const haystack = type === "provider" ? [data.name, data.npi, data.provider_type, ...(data.credentials || [])] : [data.legal_name, data.name, data.type_2_npi, data.tax_id_number, data.dba];
     return haystack.join(" ").toLowerCase().includes(deferredQuery.toLowerCase());
@@ -678,48 +685,38 @@ function DataConnections() {
   const workspace = useWorkspace();
   const [params] = useSearchParams();
   const connectionRequest = useRequest(entityPath(entityId, "/connections"));
-  const [connectionError, setConnectionError] = useState("");
-  const [connectionMessage, setConnectionMessage] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
-  const [repairingMonitoring, setRepairingMonitoring] = useState(false);
   const automaticMonitoringAttempt = useRef(false);
   const connectionReturnHandled = useRef(false);
   const canManageDocuments = ["super_admin", "customer_admin", "credentialing_specialist"].includes(workspace?.user?.role);
   const drive = connectionRequest.data?.google_drive;
   const returnedFromGoogleConnection = params.get("connected") === "google-drive";
-  const { openFolderPicker, folderPicker } = useIntakeFolderPicker(entityId, (folder) => {
-    setConnectionMessage(`${folder.name} is now the intake folder and monitoring is active.`);
+  const { openFolderPicker, folderPicker } = useIntakeFolderPicker(entityId, () => {
     connectionRequest.refresh();
   });
 
   const startConnection = () => {
     setConnecting(true);
-    setConnectionError("");
-    setConnectionMessage("");
     fetchJson(entityPath(entityId, "/oauth/google/start"))
       .then(({ authorization_url: authorizationUrl }) => {
         if (!authorizationUrl) throw new Error("Google Drive authorization could not be started.");
         window.location.assign(authorizationUrl);
       })
-      .catch((error) => {
+      .catch(() => {
         setConnecting(false);
-        setConnectionError(error.message || "We could not start the Google Drive connection.");
       });
   };
 
   const disconnectDrive = () => {
     setDisconnecting(true);
-    setConnectionError("");
-    setConnectionMessage("");
     fetchJson(entityPath(entityId, "/connections/google-drive"), { method: "DELETE" })
       .then(() => {
         setConfirmingDisconnect(false);
-        setConnectionMessage("Google Drive disconnected. Existing credentialing records were not changed.");
         connectionRequest.refresh();
       })
-      .catch((error) => setConnectionError(error.message || "We could not disconnect Google Drive."))
+      .catch(() => {})
       .finally(() => setDisconnecting(false));
   };
 
@@ -739,18 +736,14 @@ function DataConnections() {
 
     automaticMonitoringAttempt.current = true;
     let active = true;
-    setRepairingMonitoring(true);
-    setConnectionError("");
     fetchJson(entityPath(entityId, "/drive/watch"), { method: "POST" })
       .then(({ intake_ready: isReady }) => {
         if (!isReady) throw new Error("Google Drive did not confirm document monitoring.");
         if (active) {
-          setConnectionMessage("Document monitoring is active for the selected intake folder.");
           connectionRequest.refresh();
         }
       })
-      .catch((error) => active && setConnectionError(error.message || "We could not automatically activate document monitoring. Choose the intake folder again to retry."))
-      .finally(() => active && setRepairingMonitoring(false));
+      .catch(() => {});
 
     return () => { active = false; };
   }, [canManageDocuments, drive?.connected, drive?.intake_folder_configured, drive?.intake_ready, entityId]);
@@ -764,7 +757,6 @@ function DataConnections() {
     <section className="workspace-panel connection-panel">
       <div className="section-heading">
         <div>
-          <p className="eyebrow">Document source</p>
           <div className="connection-source-title"><h2>Google Drive</h2><span className={`connection-status ${drive?.connected ? "is-connected" : ""}`}>{drive?.connected ? "Connected" : "Not connected"}</span></div>
         </div>
       </div>
@@ -781,16 +773,12 @@ function DataConnections() {
           {drive?.connected && (canManageDocuments ? <button className="connection-intake-folder" type="button" onClick={openFolderPicker}>
             <span>Intake folder</span>
             <strong>{drive.intake_folder_configured ? value(drive.intake_folder_name, "Selected folder") : "Not selected yet"}</strong>
-            <small>{drive.intake_ready ? "Monitoring active - change folder" : repairingMonitoring ? "Activating document monitoring..." : drive.intake_folder_configured ? "Preparing document monitoring..." : "Select a folder to begin"}</small>
           </button> : <dl className="connection-details">
             <div>
               <dt>Intake folder</dt>
               <dd>{drive.intake_folder_configured ? value(drive.intake_folder_name, "Selected folder") : "Not selected yet"}</dd>
             </div>
           </dl>)}
-          {params.get("connected") === "google-drive" && <p className="connection-success" role="status">Google Drive connected successfully. Choose the intake folder next.</p>}
-          {connectionMessage && <p className="connection-success" role="status">{connectionMessage}</p>}
-          {connectionError && <p className="connection-error" role="alert">{connectionError}</p>}
         </div>
         <div className="connection-actions">
           {canManageDocuments && !drive?.connected && <button className="primary-button" type="button" onClick={startConnection} disabled={connecting}>{connecting ? "Opening Google..." : "Connect Google Drive"}</button>}
@@ -1282,9 +1270,9 @@ function LinkedProvidersTable({ providers, locations, entityId }) { const locati
 function AffiliatedPracticesTable({ affiliations, entityId }) { return <div className="detail-table-wrap"><table className="detail-table"><thead><tr><th>Practice</th><th>Type 2 NPI</th><th>Locations</th></tr></thead><tbody>{affiliations.length ? affiliations.map((affiliation) => <tr key={affiliation.id || affiliation.group.id}><td><Link className="relationship-record-link" to={href(`/practices/${encodeURIComponent(affiliation.group.id)}/view`, entityId)}>{textValue(affiliation.group.legal_name || affiliation.group.name, "Practice name not captured")}</Link></td><td>{value(affiliation.group.type_2_npi, "Type 2 NPI not captured")}</td><td>{textValue(affiliation.locations?.map(locationLabel), "Location not captured")}</td></tr>) : <EmptyRow columns="3">This provider is not linked to a practice yet.</EmptyRow>}</tbody></table></div>; }
 function LicenseTable({ licenses }) { return <div className="provider-table-wrap"><table className="provider-table"><thead><tr><th>Type</th><th>License #</th><th>State</th><th>Issued</th><th>Expires</th></tr></thead><tbody>{licenses?.length ? licenses.map((license, index) => <tr key={index} className={expirationState(license.expiration_date || license.expires) ? "is-expired" : ""}><td>{textValue(license.type, "License type not captured")}</td><td>{value(license.license_number || license.number, "License number not captured")}</td><td>{value(license.state, "State not captured")}</td><td>{dateLabel(license.issue_date || license.issued)}</td><td className={expirationState(license.expiration_date || license.expires) ? "expiration-date is-expired" : ""}>{dateLabel(license.expiration_date || license.expires)}</td></tr>) : <EmptyRow columns="5">No license information has been captured yet.</EmptyRow>}</tbody></table></div>; }
 function SpecialtyCards({ specialties }) { return specialties?.length ? <div className="specialty-list">{specialties.map((specialty, index) => <article className="specialty-card" key={index}><strong>{textValue(specialty.name || specialty.specialty)}</strong><p>{specialty.board_certified ? "Board certified" : "Board certification not captured"}{specialty.board ? ` · ${textValue(specialty.board)}` : ""}</p>{specialty.expiration_date && <p className={expirationState(specialty.expiration_date) ? "expiration-date is-expired" : ""}>Expires {dateLabel(specialty.expiration_date)}</p>}</article>)}</div> : <div className="empty-inline">No specialty information has been captured yet.</div>; }
-function EducationTimeline({ records }) { return records?.length ? <div className="education-timeline">{records.map((education, index) => <article key={index}><span /><div className="education-detail"><p>{textValue(education.education_type || education.type, "Education")}</p><strong>{textValue(education.institution_name || education.institution, "Institution not captured")}</strong><small>{textValue([education.degree, education.specialty].filter(Boolean).join(" · "), "Degree not captured")}</small></div></article>)}</div> : <div className="empty-inline">No education information has been captured yet.</div>; }
-function InsuranceCards({ policies }) { return policies?.length ? <div className="insurance-cards">{policies.map((policy, index) => { const expired = expirationState(policy.expiration_date || policy.expires); return <article className={`insurance-card ${expired ? "is-expired" : ""}`} key={index}><span>{textValue(policy.insurance_type || policy.type, "Liability insurance")}</span><strong>{textValue(policy.carrier_name || policy.carrier, "Carrier not captured")}</strong><Info label="Policy #" value={policy.policy_number} empty="Policy number not captured" /><Info label="Coverage period" value={[dateLabel(policy.effective_date, "Effective date not captured"), dateLabel(policy.expiration_date || policy.expires, "Expiration date not captured")].join(" – ")} />{expired && <span className="expired-badge">Expired</span>}</article>; })}</div> : <div className="empty-inline">No liability coverage information has been captured yet.</div>; }
-function PayerTable({ payers }) { return <div className="provider-table-wrap"><table className="provider-table"><thead><tr><th>Payer</th><th>Practice</th><th>Locations</th><th>Enrollment status</th></tr></thead><tbody>{payers?.length ? payers.map((payer, index) => <tr key={index}><td>{textValue(payer.payer_name || payer.name || payer.payer)}</td><td>{textValue(payer.group_name || payer.practice_name || payer.practice)}</td><td>{textValue(Array.isArray(payer.location_names || payer.locations) ? (payer.location_names || payer.locations).map((location) => typeof location === "string" ? location : locationLabel(location)) : payer.location_names || payer.locations, "Location not captured")}</td><td><span className="activity-category">{textValue(payer.enrollment_status || payer.status, "Unknown")}</span></td></tr>) : <EmptyRow columns="4">No payer enrollment information has been captured yet.</EmptyRow>}</tbody></table></div>; }
+function EducationTimeline({ records }) { return records?.length ? <div className="education-timeline">{records.map((education, index) => <article key={index}><span /><div className="education-detail"><p>{textValue(education.education_type || education.type, "Education")}</p><strong>{textValue(education.institution_name || education.institution, "Institution not captured")}</strong><small>{textValue([education.degree, education.specialty].filter(Boolean).join(" · "), "Degree not captured")}</small><small className="education-dates">Start: {dateLabel(education.start_date, "Not captured")} · End: {dateLabel(education.end_date, "Not captured")}</small></div></article>)}</div> : <div className="empty-inline">No education information has been captured yet.</div>; }
+function InsuranceCards({ policies }) { return policies?.length ? <div className="insurance-cards">{policies.map((policy, index) => { const expired = expirationState(policy.expiration_date || policy.expires); return <article className={`insurance-card ${expired ? "is-expired" : ""}`} key={index}><span>{textValue(policy.insurance_type || policy.type, "Liability insurance")}</span><strong>{textValue(policy.carrier_name || policy.carrier, "Carrier not captured")}</strong><Info label="Policy number" value={policy.policy_number} empty="Policy number not captured" /><Info label="Effective date" value={dateLabel(policy.effective_date, "Effective date not captured")} /><Info label="Expiration date" value={dateLabel(policy.expiration_date || policy.expires, "Expiration date not captured")} /><Info label="Claim amount" value={policy.claim_amount} empty="Claim amount not captured" /><Info label="Aggregate amount" value={policy.aggregate_amount} empty="Aggregate amount not captured" />{expired && <span className="expired-badge">Expired</span>}</article>; })}</div> : <div className="empty-inline">No liability coverage information has been captured yet.</div>; }
+function PayerTable({ payers }) { return <div className="provider-table-wrap"><table className="provider-table payer-table"><thead><tr><th>Payer</th><th>Practice</th><th>Locations</th><th>Enrollment status</th></tr></thead><tbody>{payers?.length ? payers.map((payer, index) => <tr key={index}><td>{textValue(payer.payer_name || payer.name || payer.payer)}</td><td>{textValue(payer.group_name || payer.practice_name || payer.practice)}</td><td className="payer-locations">{textValue(Array.isArray(payer.location_names || payer.locations) ? (payer.location_names || payer.locations).map((location) => typeof location === "string" ? location : locationLabel(location)) : payer.location_names || payer.locations, "Location not captured")}</td><td><span className="activity-category">{textValue(payer.enrollment_status || payer.status, "Unknown")}</span></td></tr>) : <EmptyRow columns="4">No payer enrollment information has been captured yet.</EmptyRow>}</tbody></table></div>; }
 
 function capitalizeLabel(label) {
   const text = String(label || "");

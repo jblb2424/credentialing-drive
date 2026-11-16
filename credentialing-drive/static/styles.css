@@ -359,6 +359,8 @@ h2 { font: 700 23px/1.2 var(--font-display); }
 .payer-table th:nth-child(3) { width: 31%; }
 .payer-table th:nth-child(4) { width: 25%; }
 .payer-table td { vertical-align: middle; }
+.payer-table th, .payer-table td { white-space: normal; overflow-wrap: anywhere; }
+.payer-table .payer-locations { line-height: 1.5; }
 .payer-name strong, .payer-name .table-note { display: block; }
 .payer-name .table-note { margin-top: 6px; }
 .payer-status .enrollment-status { max-width: 100%; padding: 7px 12px; line-height: 1.25; white-space: normal; }
