@@ -1,0 +1,8 @@
+[
+  {
+    "origin": ["https://app.cozemahealth.com"],
+    "method": ["PUT"],
+    "responseHeader": ["Content-Type"],
+    "maxAgeSeconds": 3600
+  }
+]

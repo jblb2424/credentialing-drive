@@ -5,6 +5,7 @@ import { entityPath, fetchJson, fetchWithAuth } from "./api.js";
 import { INTAKE_FOLDER_SELECTION_COPY, useIntakeFolderPicker } from "./intake-folder-picker.jsx";
 import { IssueDismissalDialog, IssueDismissButton, TrashIcon, useIssueDismissal } from "./issue-dismissal.jsx";
 import { ExpirationStatusTag, IssueStatusTags, issueRowClassName } from "./issue-presentation.jsx";
+import { NativeUploader } from "./native-uploader.jsx";
 import { useWorkspace } from "./workspace.jsx";
 import { DEFAULT_ENTITY_ID, addressLabel, categoryLabel, dateLabel, expirationState, fieldLabel, issueLabel, issueTypeLabel, locationLabel, priority, providerData, recordName, shortDate, textValue, timestampLabel, value } from "./utils.js";
 
@@ -186,6 +187,8 @@ function Shell({ active, children, refresh }) {
   const workspace = useWorkspace();
   const canManageMembers = ["super_admin", "customer_admin", "manager"].includes(workspace?.user?.role);
   const intakeStatus = useDriveIntakeStatus(entityId);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const canManageDocuments = ["super_admin", "customer_admin", "credentialing_specialist"].includes(workspace?.user?.role);
   const activeDocumentCount = intakeStatus?.active_document_count || 0;
   const isProcessingDocuments = activeDocumentCount > 0;
   const intakeLabel = isProcessingDocuments
@@ -201,8 +204,9 @@ function Shell({ active, children, refresh }) {
       <div className="sidebar-footer"><p>Data refreshes from your connected credentialing workspace.</p></div>
     </aside>
     <main className={active === "overview" ? "content" : "workspace-content"}>
-      <header className="topbar"><div className="mobile-brand"><BrandWordmark /></div><div className={`status-line${isProcessingDocuments ? " is-processing" : ""}`} aria-live="polite" aria-busy={isProcessingDocuments}><span className={isProcessingDocuments ? "intake-spinner" : "live-dot"} aria-hidden="true" />{intakeLabel}</div><AuthControls />{refresh && <button className="refresh-button" type="button" onClick={refresh}><span>↻</span>Refresh data</button>}</header>
+      <header className="topbar"><div className="topbar-leading"><div className="mobile-brand"><BrandWordmark /></div>{canManageDocuments && <button className="upload-documents-button" type="button" onClick={() => setUploadDialogOpen(true)}><span aria-hidden="true">↥</span>Upload documents</button>}</div><div className="topbar-actions"><div className={`status-line${isProcessingDocuments ? " is-processing" : ""}`} aria-live="polite" aria-busy={isProcessingDocuments}><span className={isProcessingDocuments ? "intake-spinner" : "live-dot"} aria-hidden="true" />{intakeLabel}</div><AuthControls /></div></header>
       {children}
+      {uploadDialogOpen && <NativeUploader entityId={entityId} onClose={() => setUploadDialogOpen(false)} />}
     </main>
   </div>;
 }

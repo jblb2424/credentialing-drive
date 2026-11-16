@@ -13,6 +13,7 @@ from app.drive_files import (
     download_drive_document, download_drive_spreadsheet, get_drive_file_metadata,
     parse_spreadsheet,
 )
+from app.native_uploads import native_upload_max_bytes, read_native_upload
 from app.extraction import extract_document_text
 from app.gemini import (
     classify_document_category, interpret_spreadsheet_with_gemini,
@@ -37,8 +38,7 @@ def save_spreadsheet_providers(metadata, providers, document_category, entity_id
         upsert_normalized_provider(normalized_provider, metadata, document_category, entity_id)
 
 
-def process_drive_spreadsheet_in_memory(service, file_id, entity_id=DEFAULT_ENTITY_ID):
-    metadata, spreadsheet_bytes = download_drive_spreadsheet(service, file_id)
+def process_spreadsheet_bytes(metadata, spreadsheet_bytes, entity_id=DEFAULT_ENTITY_ID):
     try:
         rows = parse_spreadsheet(spreadsheet_bytes, metadata["mimeType"])
         document_category = classify_document_category(
@@ -57,6 +57,11 @@ def process_drive_spreadsheet_in_memory(service, file_id, entity_id=DEFAULT_ENTI
     }
 
 
+def process_drive_spreadsheet_in_memory(service, file_id, entity_id=DEFAULT_ENTITY_ID):
+    metadata, spreadsheet_bytes = download_drive_spreadsheet(service, file_id)
+    return process_spreadsheet_bytes(metadata, spreadsheet_bytes, entity_id)
+
+
 def save_document_provider(metadata, extraction, document_category, entity_id=DEFAULT_ENTITY_ID):
     provider = normalize_provider_data(extraction)
     group_id = upsert_normalized_group(provider, metadata, document_category, entity_id)
@@ -64,8 +69,7 @@ def save_document_provider(metadata, extraction, document_category, entity_id=DE
     return {"group_id": group_id, "provider_id": provider_id}
 
 
-def process_drive_document_in_memory(service, file_id, entity_id=DEFAULT_ENTITY_ID):
-    metadata, document_bytes = download_drive_document(service, file_id)
+def process_document_bytes(metadata, document_bytes, entity_id=DEFAULT_ENTITY_ID):
     try:
         extracted_text, page_count = extract_document_text(
             document_bytes, metadata["mimeType"]
@@ -85,6 +89,11 @@ def process_drive_document_in_memory(service, file_id, entity_id=DEFAULT_ENTITY_
         "extracted_text": extracted_text,
         "gemini_interpretation": extraction,
     }
+
+
+def process_drive_document_in_memory(service, file_id, entity_id=DEFAULT_ENTITY_ID):
+    metadata, document_bytes = download_drive_document(service, file_id)
+    return process_document_bytes(metadata, document_bytes, entity_id)
 
 
 def process_queued_drive_file(service, file_id, entity_id=DEFAULT_ENTITY_ID):
@@ -111,6 +120,44 @@ def process_queued_drive_file(service, file_id, entity_id=DEFAULT_ENTITY_ID):
         "extracted_character_count": len(result["extracted_text"]),
         "gemini_response_character_count": len(str(result["gemini_interpretation"])),
     }
+
+
+def process_queued_native_upload(event, entity_id=DEFAULT_ENTITY_ID):
+    """Process one browser-uploaded object without retaining its source bytes."""
+    mime_type = event.get("mime_type")
+    metadata = {
+        "id": event.get("id"),
+        "name": event.get("file_name"),
+        "mimeType": mime_type,
+        "size": event.get("size_bytes"),
+    }
+    if mime_type not in DOCUMENT_MIME_TYPES | SPREADSHEET_MIME_TYPES:
+        return {"status": "skipped", "metadata": metadata}
+
+    _, document_bytes = read_native_upload(event.get("object_name", ""))
+    try:
+        if len(document_bytes) > native_upload_max_bytes(mime_type):
+            raise HTTPException(status_code=413, detail="Uploaded document exceeds the processing limit")
+        if mime_type in SPREADSHEET_MIME_TYPES:
+            result = process_spreadsheet_bytes(metadata, document_bytes, entity_id)
+            return {
+                "status": "imported",
+                "metadata": result["metadata"],
+                "source_row_count": result["source_row_count"],
+                "provider_count": result["provider_count"],
+            }
+
+        result = process_document_bytes(metadata, document_bytes, entity_id)
+        return {
+            "status": "processed",
+            "metadata": result["metadata"],
+            "page_count": result["page_count"],
+            "extracted_character_count": len(result["extracted_text"]),
+            "gemini_response_character_count": len(str(result["gemini_interpretation"])),
+        }
+    finally:
+        # Do not keep a second in-process copy after extraction completes.
+        document_bytes = b""
 
 
 def process_drive_changes(service, connection, entity_id=DEFAULT_ENTITY_ID):

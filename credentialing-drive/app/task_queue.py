@@ -40,16 +40,22 @@ def queue_path(client=None):
     )
 
 
-def task_id_for_file(entity_id, file_id, allow_duplicate=False):
-    # Cloud Tasks task IDs are restrictive; hash Drive's opaque file ID for safe idempotency.
-    task_id = f"drive-{hashlib.sha256(f'{entity_id}:{file_id}'.encode()).hexdigest()[:40]}"
+def task_id_for_document(entity_id, document_id, source, allow_duplicate=False):
+    # Cloud Tasks task IDs are restrictive; source prevents a native upload ID
+    # from colliding with an opaque Google Drive file ID.
+    task_id = f"document-{hashlib.sha256(f'{entity_id}:{source}:{document_id}'.encode()).hexdigest()[:40]}"
     return f"{task_id}-{uuid.uuid4().hex[:8]}" if allow_duplicate else task_id
 
 
-def enqueue_drive_processing_task(entity_id, file_id, allow_duplicate=False):
+def task_id_for_file(entity_id, file_id, allow_duplicate=False):
+    """Compatibility helper for existing Drive callers and tests."""
+    return task_id_for_document(entity_id, file_id, "google_drive", allow_duplicate)
+
+
+def enqueue_document_processing_task(entity_id, document_id, source, allow_duplicate=False):
     client = tasks_v2.CloudTasksClient()
     parent = queue_path(client)
-    task_name = f"{parent}/tasks/{task_id_for_file(entity_id, file_id, allow_duplicate)}"
+    task_name = f"{parent}/tasks/{task_id_for_document(entity_id, document_id, source, allow_duplicate)}"
     target_url = get_task_processor_url()
     task = {
         "name": task_name,
@@ -57,7 +63,7 @@ def enqueue_drive_processing_task(entity_id, file_id, allow_duplicate=False):
             "http_method": tasks_v2.HttpMethod.POST,
             "url": target_url,
             "headers": {"Content-Type": "application/json"},
-            "body": json.dumps({"entity_id": entity_id, "file_id": file_id}).encode(),
+            "body": json.dumps({"entity_id": entity_id, "document_id": document_id, "source": source}).encode(),
             "oidc_token": {
                 "service_account_email": get_task_service_account(),
                 "audience": target_url,
@@ -66,6 +72,10 @@ def enqueue_drive_processing_task(entity_id, file_id, allow_duplicate=False):
         "dispatch_deadline": duration_pb2.Duration(seconds=1800),
     }
     return client.create_task(parent=parent, task=task).name
+
+
+def enqueue_drive_processing_task(entity_id, file_id, allow_duplicate=False):
+    return enqueue_document_processing_task(entity_id, file_id, "google_drive", allow_duplicate)
 
 
 def verify_task_request(request: Request):

@@ -18,6 +18,7 @@ from app.config import (
     ENTITY_COLLECTION,
     ENTITY_MEMBER_COLLECTION,
     EVENT_COLLECTION,
+    NATIVE_UPLOAD_SOURCE,
     PROVIDER_COLLECTION,
     SCOPES,
     allow_duplicate_drive_imports,
@@ -48,6 +49,13 @@ from app.clerk import (
 from app.processing import (
     process_drive_changes, process_drive_document_in_memory,
 )
+from app.native_uploads import (
+    native_upload_bucket,
+    native_upload_event,
+    signed_native_upload_url,
+    validate_native_upload,
+)
+from app.task_queue import enqueue_document_processing_task
 from app.providers import (
     delete_provider, get_entity, get_group, get_group_issue, get_provider, get_provider_issue, list_groups,
     list_provider_expirations, list_providers, list_issue_summaries, list_entity_activity, get_record_activity,
@@ -66,7 +74,7 @@ authenticated_router = APIRouter(dependencies=[Depends(require_authenticated_use
 logger = logging.getLogger(__name__)
 PROJECT_DIRECTORY = Path(__file__).resolve().parent.parent
 REACT_DASHBOARD_INDEX = PROJECT_DIRECTORY / "react-dashboard" / "dist" / "index.html"
-ACTIVE_DRIVE_INTAKE_EVENT_STATUSES = ("detected", "queued", "processing", "retrying")
+ACTIVE_DRIVE_INTAKE_EVENT_STATUSES = ("detected", "queued", "processing", "retrying", "purging")
 
 
 def react_dashboard_view():
@@ -304,6 +312,82 @@ def get_drive_intake_status(entity_id: str):
         .stream()
     )
     return summarize_drive_intake_events(events)
+
+
+@authenticated_router.post(
+    "/entities/{entity_id}/uploads",
+    dependencies=[Depends(require_entity_permission("documents:manage"))],
+)
+async def create_native_upload(entity_id: str, request: Request):
+    """Create one ephemeral, direct-to-Storage native upload slot."""
+    payload = await member_payload(request)
+    file_name, mime_type, size_bytes = validate_native_upload(
+        payload.get("file_name"), payload.get("mime_type"), payload.get("size_bytes")
+    )
+    upload_id = uuid.uuid4().hex
+    event = native_upload_event(upload_id, file_name, mime_type, size_bytes, entity_id)
+    # Fail before creating any intake record when Storage is not provisioned or
+    # the runtime identity cannot sign an upload URL.
+    upload_url = signed_native_upload_url(event["object_name"], mime_type)
+    event_ref = (
+        get_firestore_client()
+        .collection(ENTITY_COLLECTION)
+        .document(entity_id)
+        .collection(EVENT_COLLECTION)
+        .document(event["id"])
+    )
+    event_ref.create(event)
+    return {
+        "upload": {
+            "id": event["id"],
+            "file_name": file_name,
+            "mime_type": mime_type,
+            "upload_url": upload_url,
+        }
+    }
+
+
+@authenticated_router.post(
+    "/entities/{entity_id}/uploads/{upload_id}/complete",
+    dependencies=[Depends(require_entity_permission("documents:manage"))],
+)
+def complete_native_upload(entity_id: str, upload_id: str):
+    """Verify a direct upload and enqueue it for the isolated document worker."""
+    event_ref = (
+        get_firestore_client()
+        .collection(ENTITY_COLLECTION)
+        .document(entity_id)
+        .collection(EVENT_COLLECTION)
+        .document(upload_id)
+    )
+    event_snapshot = event_ref.get()
+    if not event_snapshot.exists:
+        raise HTTPException(status_code=404, detail="Upload was not found")
+    event = event_snapshot.to_dict() or {}
+    if event.get("source") != NATIVE_UPLOAD_SOURCE:
+        raise HTTPException(status_code=400, detail="This is not a native upload")
+    if event.get("status") in {"queued", "processing", "retrying", "purging", "processed", "imported", "skipped"}:
+        return {"upload": {"id": upload_id, "status": event.get("status")}}
+    if event.get("status") != "awaiting_upload":
+        raise HTTPException(status_code=409, detail="Upload is not ready to be queued")
+
+    blob = native_upload_bucket().blob(event.get("object_name", ""))
+    try:
+        blob.reload()
+    except Exception as exc:
+        raise HTTPException(status_code=409, detail="The document upload has not finished") from exc
+    if blob.size != event.get("size_bytes") or blob.content_type != event.get("mime_type"):
+        # Never queue a different object than the one the workspace authorized.
+        raise HTTPException(status_code=400, detail="Uploaded document did not match the requested file")
+
+    try:
+        task_name = enqueue_document_processing_task(entity_id, upload_id, NATIVE_UPLOAD_SOURCE)
+    except Exception as exc:
+        logger.exception("Could not enqueue native upload %s", upload_id)
+        event_ref.set({"status": "enqueue_failed"}, merge=True)
+        raise HTTPException(status_code=503, detail="The document could not be queued") from exc
+    event_ref.set({"status": "queued", "task_name": task_name}, merge=True)
+    return {"upload": {"id": upload_id, "status": "queued"}}
 
 
 @authenticated_router.delete(
