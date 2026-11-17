@@ -18,7 +18,7 @@ substitutions:
   _INTERNAL_SERVICE_URL: https://credentialing-drive-focv4xemnq-ue.a.run.app
   _DRIVE_WATCH_OWNER: cloud
   _VERTEX_AI_LOCATION: global
-  _GEMINI_MODEL: gemini-3.5-flash
+  _GEMINI_MODEL: gemini-3.8-flash
   _DOCUMENT_AI_LOCATION: us
   _DOCUMENT_AI_PROCESSOR_ID: 82ab43b860883ee5
   _BETTER_AUTH_URL: https://auth.cozemahealth.com
