@@ -411,6 +411,30 @@
   transform: translateY(-1px);
 }
 
+.attention-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding-top: 16px;
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+.attention-pagination > div {
+  display: flex;
+  gap: 8px;
+}
+
+.attention-pagination .secondary-button {
+  align-self: auto;
+  min-height: 34px;
+}
+
+.attention-list.has-critical-issues {
+  min-height: 330px;
+}
+
 .connection-panel {
   min-height: 255px;
 }
