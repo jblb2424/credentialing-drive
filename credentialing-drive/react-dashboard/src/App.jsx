@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useDeferredValue, useEffect, useRef, useState } from "react";
 import { Link, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AuthControls } from "./auth.jsx";
 import { entityPath, fetchJson, fetchWithAuth } from "./api.js";
@@ -21,6 +21,11 @@ const navItems = [
 ];
 const EDITABLE_RECORD_ROLES = new Set(["super_admin", "customer_admin", "manager", "credentialing_specialist"]);
 const SEVERITY_RANKS = { critical: 0, high: 1, medium: 2, low: 3 };
+const UploadDocumentsContext = createContext(() => {});
+
+function useUploadDocuments() {
+  return useContext(UploadDocumentsContext);
+}
 
 function meetsSeverityThreshold(issueSeverity, threshold) {
   if (!threshold) return true;
@@ -31,6 +36,10 @@ function meetsSeverityThreshold(issueSeverity, threshold) {
 
 function BrandWordmark() {
   return <>Cozema<span className="brand-accent">Health</span></>;
+}
+
+function FolderIcon() {
+  return <svg className="folder-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5h6l2 2h9v9.25a2.25 2.25 0 0 1-2.25 2.25H5.75A2.25 2.25 0 0 1 3.5 17.75V6.5Z" /><path d="M3.5 8.5h17" /></svg>;
 }
 
 function DetailActionsMenu({ actionLabel, onAction }) {
@@ -185,9 +194,9 @@ function useDriveIntakeStatus(entityId) {
 function Shell({ active, children, refresh }) {
   const entityId = useEntity();
   const workspace = useWorkspace();
+  const openUploadDocuments = useUploadDocuments();
   const canManageMembers = ["super_admin", "customer_admin", "manager"].includes(workspace?.user?.role);
   const intakeStatus = useDriveIntakeStatus(entityId);
-  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const canManageDocuments = ["super_admin", "customer_admin", "credentialing_specialist"].includes(workspace?.user?.role);
   const activeDocumentCount = intakeStatus?.active_document_count || 0;
   const isProcessingDocuments = activeDocumentCount > 0;
@@ -204,9 +213,8 @@ function Shell({ active, children, refresh }) {
       <div className="sidebar-footer"><p>Data refreshes from your connected credentialing workspace.</p></div>
     </aside>
     <main className={active === "overview" ? "content" : "workspace-content"}>
-      <header className="topbar"><div className="topbar-leading"><div className="mobile-brand"><BrandWordmark /></div>{canManageDocuments && <button className="upload-documents-button" type="button" onClick={() => setUploadDialogOpen(true)}><span aria-hidden="true">↥</span>Upload documents</button>}</div><div className="topbar-actions"><div className={`status-line${isProcessingDocuments ? " is-processing" : ""}`} aria-live="polite" aria-busy={isProcessingDocuments}><span className={isProcessingDocuments ? "intake-spinner" : "live-dot"} aria-hidden="true" />{intakeLabel}</div><AuthControls /></div></header>
+      <header className="topbar"><div className="topbar-leading"><div className="mobile-brand"><BrandWordmark /></div>{canManageDocuments && <button className="upload-documents-button" type="button" onClick={openUploadDocuments}><span aria-hidden="true">↥</span>Upload documents</button>}</div><div className="topbar-actions"><div className={`status-line${isProcessingDocuments ? " is-processing" : ""}`} aria-live="polite" aria-busy={isProcessingDocuments}><span className={isProcessingDocuments ? "intake-spinner" : "live-dot"} aria-hidden="true" />{intakeLabel}</div><AuthControls /></div></header>
       {children}
-      {uploadDialogOpen && <NativeUploader entityId={entityId} onClose={() => setUploadDialogOpen(false)} />}
     </main>
   </div>;
 }
@@ -264,6 +272,7 @@ function optimisticRecordUpdate(type, record, fields) {
 function Dashboard() {
   const entityId = useEntity();
   const workspace = useWorkspace();
+  const openUploadDocuments = useUploadDocuments();
   const [refreshKey, setRefreshKey] = useState(0);
   const groups = useRequest(`${entityPath(entityId, "/groups?limit=500")}&refresh=${refreshKey}`);
   const providers = useRequest(`${entityPath(entityId, "/providers?limit=500")}&refresh=${refreshKey}`);
@@ -271,6 +280,7 @@ function Dashboard() {
   const connections = useRequest(entityPath(entityId, "/connections"));
   const dismissal = useIssueDismissal(entityId, { onDismissed: () => setRefreshKey((key) => key + 1) });
   const groupRecords = groups.data?.groups || [];
+  const sortedGroupRecords = [...groupRecords].sort((left, right) => textValue(left.legal_name || left.name, "").localeCompare(textValue(right.legal_name || right.name, ""), undefined, { sensitivity: "base" }));
   const providerRecords = providers.data?.providers || [];
   const issues = allIssues(issueSummaries.data?.issues || []);
   const expiring = issues.filter((issue) => issue.type === "expiring");
@@ -304,7 +314,7 @@ function Dashboard() {
   useEffect(() => { document.title = "Credentialing Operations | Cozema Health"; }, []);
   return <Shell active="overview" refresh={() => setRefreshKey((key) => key + 1)}>
     <section className="hero"><p className="eyebrow">Credentialing overview</p><h1>{Greeting()}</h1></section>
-    {connectionReady && <section className="connection-banner"><div><p className="eyebrow">{intakeReady ? "AI credentialing intake" : intakeFolderConfigured ? "Document intake" : "Workspace setup"}</p><h2 className="connection-banner-title"><svg className="ai-sparkles-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3-1.9 5.1L5 10l5.1 1.9L12 17l1.9-5.1L19 10l-5.1-1.9L12 3Z" /><path d="m19 15-.8 2.2L16 18l2.2.8L19 21l.8-2.2L22 18l-2.2-.8L19 15Z" /><path d="m5 15-.55 1.45L3 17l1.45.55L5 19l.55-1.45L7 17l-1.45-.55L5 15Z" /></svg>{intakeReady ? "AI is handling your credentialing intake" : intakeFolderConfigured ? "Preparing your AI credentialing intake" : driveConnected ? "Finish setting up your intake folder" : "Connect your credentialing documents"}</h2><p>{intakeReady ? "Files added to your connected folder are transformed by AI into provider and practice records, with missing information, discrepancies, and expirations flagged for review." : intakeFolderConfigured ? <>Your Google Drive intake folder, <strong>{textValue(drive?.intake_folder_name, "your selected folder")}</strong>, is being prepared for AI intake. Files added here will be transformed into provider and practice records, with missing information, discrepancies, and expirations flagged for review.</> : driveConnected ? INTAKE_FOLDER_SELECTION_COPY : "Connect Google Drive to begin bringing new provider and practice documents into this workspace."}</p>{connectionError && <p className="connection-error" role="alert">{connectionError}</p>}</div>{!driveConnected && canManageDocuments ? <button className="primary-button" type="button" onClick={startGoogleDriveConnection} disabled={connectingDrive}>{connectingDrive ? "Opening Google..." : "Connect Google Drive"}</button> : driveConnected && !intakeFolderConfigured && canManageDocuments ? <button className="primary-button" type="button" onClick={openFolderPicker}>Choose intake folder</button> : <Link className="primary-button" to={href("/data-connections/view", entityId)}>View data connections</Link>}</section>}
+    {connectionReady && <section className="connection-banner"><div><p className="eyebrow">{driveConnected ? "AI credentialing intake" : "Workspace setup"}</p><h2 className="connection-banner-title"><svg className="ai-sparkles-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3-1.9 5.1L5 10l5.1 1.9L12 17l1.9-5.1L19 10l-5.1-1.9L12 3Z" /><path d="m19 15-.8 2.2L16 18l2.2.8L19 21l.8-2.2L22 18l-2.2-.8L19 15Z" /><path d="m5 15-.55 1.45L3 17l1.45.55L5 19l.55-1.45L7 17l-1.45-.55L5 15Z" /></svg>{driveConnected ? "AI will sort provider documents added to your drive folder" : "Connect your credentialing documents"}</h2><p>{driveConnected ? "Files added to your connected folder are transformed by AI into provider and practice records, with missing information, discrepancies, and expirations flagged for review." : "Connect Google Drive, or upload your documents manually, to have AI perform intake for you."}</p>{connectionError && <p className="connection-error" role="alert">{connectionError}</p>}</div><div className={`connection-banner-actions${driveConnected ? "" : " is-inline"}`}>{driveConnected ? <Link className="primary-button" to={href("/data-connections/view", entityId)}>View data connections</Link> : canManageDocuments ? <><button className="primary-button" type="button" onClick={startGoogleDriveConnection} disabled={connectingDrive}>{connectingDrive ? "Opening Google..." : "Connect Google Drive"}</button><button className="secondary-button connection-banner-upload" type="button" onClick={openUploadDocuments}>Upload manually</button></> : <Link className="primary-button" to={href("/data-connections/view", entityId)}>View data connections</Link>}</div></section>}
     {folderPicker}
     <section className="metrics" aria-label="Credentialing summary">
       <Link className="metric-card metric-link" to={href("/practices/view", entityId)}><p>Practices</p>{groups.loading ? <LoadingCount label="practices" /> : <strong>{groups.error ? "Unavailable" : groupRecords.length}</strong>}<span>Browse all practices</span></Link>
@@ -316,7 +326,7 @@ function Dashboard() {
       <div className="attention-list">{issueSummaries.loading ? <div className="loading-row"><span className="spinner" />Loading critical issues...</div> : issueSummaries.error ? <div className="empty-state">{issueSummaries.error.message}</div> : critical.length ? critical.map((issue, index) => <CriticalIssue key={`${issue.id || issueLabel(issue)}-${index}`} issue={issue} entityId={entityId} canManageIssues={canManageIssues} onDismiss={dismissal.requestDismissal} />) : <div className="empty-state">No critical issues require immediate attention.</div>}</div>
       {(dismissal.message || dismissal.error) && <p className={`operation-notice ${dismissal.error ? "is-error" : ""}`} role={dismissal.error ? "alert" : "status"}>{dismissal.error || dismissal.message}</p>}
     </section>
-    <section className="groups-section"><div className="section-heading"><div><p className="eyebrow">Practice network</p><h2>Practices</h2></div><Link to={href("/practices/view", entityId)}>Browse all practices</Link></div><div className="group-list">{groups.loading ? <div className="loading-row"><span className="spinner" />Loading practices...</div> : groups.error ? <div className="empty-state">{groups.error.message}</div> : groupRecords.map((group) => <Link className="group-chip" key={group.id} to={href(`/practices/${encodeURIComponent(group.id)}/view`, entityId)}>{textValue(group.legal_name || group.name, "Unnamed practice")}</Link>)}</div></section>
+    <section className="groups-section"><div className="section-heading"><div><p className="eyebrow">Practice network</p><h2>Practices</h2></div><Link to={href("/practices/view", entityId)}>Browse all practices</Link></div><div className="group-list">{groups.loading ? <div className="loading-row"><span className="spinner" />Loading practices...</div> : groups.error ? <div className="empty-state">{groups.error.message}</div> : sortedGroupRecords.map((group) => <Link className="group-chip" key={group.id} to={href(`/practices/${encodeURIComponent(group.id)}/view`, entityId)}>{textValue(group.legal_name || group.name, "Unnamed practice")}</Link>)}</div></section>
     <IssueDismissalDialog issue={dismissal.pendingIssue} error={dismissal.error} saving={dismissal.saving} onCancel={dismissal.cancelDismissal} onConfirm={dismissal.confirmDismissal} />
   </Shell>;
 }
@@ -775,7 +785,7 @@ function DataConnections() {
             </div>
           </div>
           {drive?.connected && (canManageDocuments ? <button className="connection-intake-folder" type="button" onClick={openFolderPicker}>
-            <span>Intake folder</span>
+            <span className="connection-intake-folder-label"><FolderIcon />Intake folder</span>
             <strong>{drive.intake_folder_configured ? value(drive.intake_folder_name, "Selected folder") : "Not selected yet"}</strong>
           </button> : <dl className="connection-details">
             <div>
@@ -1034,7 +1044,7 @@ function RecordError({ error }) { return <main className="record-state-page"><se
 function RecordShell({ type, record, title, entityId, recordId, issues, locations = [], actions, children }) {
   const navigate = useNavigate();
   const activityPath = href(`/activity/view?record_id=${encodeURIComponent(recordId)}&record_type=${type}`, entityId);
-  return <div className="record-page"><header className="record-topbar"><Link className="brand" to={href("/", entityId)}><span className="brand-mark">C</span><span><BrandWordmark /></span></Link></header><main className="record-content"><section className="record-hero"><div className="record-hero-heading"><div><p className="eyebrow">{type === "practice" ? "Practice / group" : "Provider record"}</p><h1>{title}</h1><p className="lede">{type === "practice" ? "Organization credentialing profile" : "Provider credentialing profile"}</p></div>{actions}</div><nav className="record-tabs"><a href="#profile">{type === "practice" ? "Practice profile" : "Provider profile"}</a><a href="#issues">Open issues</a><a href={activityPath}>Revision history</a></nav></section><div className="record-layout"><div className="record-sections" id="profile">{children}</div><aside className="record-aside"><section className="aside-card"><p className="eyebrow">At a glance</p><Info label="Open issues" value={issues.length} /><Info label="Locations" value={locations.length} /><Link className="aside-link" to={activityPath}>View revision history <span aria-hidden="true">→</span></Link></section><section className="aside-card" id="issues"><p className="eyebrow">Record integrity</p><h2>Open issues</h2><div className="record-issues">{issues.length ? issues.map((issue, index) => <button type="button" key={`${issue.id || issueLabel(issue)}-${index}`} className={issueRowClassName("record-issue", issue)} onClick={() => navigate(href(`/${type === "practice" ? "practices" : "providers"}/${encodeURIComponent(recordId)}/issues/${encodeURIComponent(issue.id)}/view`, entityId))}><strong>{issueLabel(issue)}</strong><span className="issue-tags"><IssueStatusTags issue={issue} /></span></button>) : <div className="empty-inline">No open issues.</div>}</div></section></aside></div></main></div>;
+  return <div className="record-page"><header className="record-topbar"><Link className="brand" to={href("/", entityId)}><span className="brand-mark">C</span><span><BrandWordmark /></span></Link></header><main className="record-content"><section className="record-hero"><div className="record-hero-heading"><div><p className="eyebrow">{type === "practice" ? "Practice / group" : "Provider record"}</p><h1>{title}</h1><p className="lede">{type === "practice" ? "Organization credentialing profile" : "Provider credentialing profile"}</p></div>{actions}</div><nav className="record-tabs"><a href="#profile">{type === "practice" ? "Practice profile" : "Provider profile"}</a><a href="#issues">Open issues</a><a href={activityPath}>Revision history</a></nav></section><div className="record-layout"><div className="record-sections" id="profile">{children}</div><aside className="record-aside"><section className="aside-card"><p className="eyebrow">At a glance</p><Info label="Open issues" value={issues.length} /><Info label="Locations" value={locations.length} /><Link className="aside-link" to={activityPath}>View revision history</Link></section><section className="aside-card" id="issues"><p className="eyebrow">Record integrity</p><h2>Open issues</h2><div className="record-issues">{issues.length ? issues.map((issue, index) => <button type="button" key={`${issue.id || issueLabel(issue)}-${index}`} className={issueRowClassName("record-issue", issue)} onClick={() => navigate(href(`/${type === "practice" ? "practices" : "providers"}/${encodeURIComponent(recordId)}/issues/${encodeURIComponent(issue.id)}/view`, entityId))}><strong>{issueLabel(issue)}</strong><span className="issue-tags"><IssueStatusTags issue={issue} /></span></button>) : <div className="empty-inline">No open issues.</div>}</div></section></aside></div></main></div>;
 }
 
 const SECTION_EDIT_CONFIG = {
@@ -1389,23 +1399,28 @@ function IssueDetail({ type }) {
 }
 
 export function App() {
-  return <Routes>
-    <Route path="/" element={<Dashboard />} />
-    <Route path="/providers/view" element={<Directory type="provider" />} />
-    <Route path="/practices/view" element={<Directory type="practice" />} />
-    <Route path="/expirations/view" element={<Expirations />} />
-    <Route path="/issues/view" element={<Issues />} />
-    <Route path="/reports/view" element={<Reports />} />
-    <Route path="/activity/view" element={<Activity />} />
-    <Route path="/users/view" element={<Users />} />
-    <Route path="/tasks/view" element={<Activity />} />
-    <Route path="/enrollment/view" element={<Workspace section="enrollment" />} />
-    <Route path="/data-connections/view" element={<DataConnections />} />
-    <Route path="/settings/view" element={<DataConnections />} />
-    <Route path="/providers/:providerId/issues/:issueId/view" element={<IssueDetail type="provider" />} />
-    <Route path="/practices/:groupId/issues/:issueId/view" element={<IssueDetail type="practice" />} />
-    <Route path="/providers/:providerId/view" element={<ProviderRecord />} />
-    <Route path="/practices/:groupId/view" element={<PracticeRecord />} />
-    <Route path="*" element={<Dashboard />} />
-  </Routes>;
+  const entityId = useEntity();
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  return <UploadDocumentsContext.Provider value={() => setUploadDialogOpen(true)}>
+    <Routes>
+      <Route path="/" element={<Dashboard />} />
+      <Route path="/providers/view" element={<Directory type="provider" />} />
+      <Route path="/practices/view" element={<Directory type="practice" />} />
+      <Route path="/expirations/view" element={<Expirations />} />
+      <Route path="/issues/view" element={<Issues />} />
+      <Route path="/reports/view" element={<Reports />} />
+      <Route path="/activity/view" element={<Activity />} />
+      <Route path="/users/view" element={<Users />} />
+      <Route path="/tasks/view" element={<Activity />} />
+      <Route path="/enrollment/view" element={<Workspace section="enrollment" />} />
+      <Route path="/data-connections/view" element={<DataConnections />} />
+      <Route path="/settings/view" element={<DataConnections />} />
+      <Route path="/providers/:providerId/issues/:issueId/view" element={<IssueDetail type="provider" />} />
+      <Route path="/practices/:groupId/issues/:issueId/view" element={<IssueDetail type="practice" />} />
+      <Route path="/providers/:providerId/view" element={<ProviderRecord />} />
+      <Route path="/practices/:groupId/view" element={<PracticeRecord />} />
+      <Route path="*" element={<Dashboard />} />
+    </Routes>
+    {uploadDialogOpen && <NativeUploader entityId={entityId} onClose={() => setUploadDialogOpen(false)} />}
+  </UploadDocumentsContext.Provider>;
 }
